@@ -55,7 +55,8 @@
     "defaultAvatar": "Avatar",
     "menuProfile": "Profile",
     "menuSettings": "Settings",
-    "menuSignOut": "Sign out"
+    "menuSignOut": "Sign out",
+    "switchLanguage": "Switch language to {name}"
   },
   "ModeToggle": {
     "switchMode": "Switch to {mode} mode"
@@ -1571,7 +1572,9 @@
       "useMode": "Use {mode} mode",
       "active": "Active",
       "accentColor": "Accent color",
-      "useTheme": "Use {name} theme"
+      "useTheme": "Use {name} theme",
+      "language": "Language",
+      "useLocale": "Use {name}"
     },
     "security": {
       "title": "Login & security",
