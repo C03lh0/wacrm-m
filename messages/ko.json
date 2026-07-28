@@ -55,7 +55,8 @@
     "defaultAvatar": "아바타",
     "menuProfile": "프로필",
     "menuSettings": "설정",
-    "menuSignOut": "로그아웃"
+    "menuSignOut": "로그아웃",
+    "switchLanguage": "{name}(으)로 언어 변경"
   },
   "ModeToggle": {
     "switchMode": "{mode} 모드로 전환"
@@ -1569,7 +1570,9 @@
       "useMode": "{mode} 모드 사용",
       "active": "사용 중",
       "accentColor": "강조 색상",
-      "useTheme": "{name} 테마 사용"
+      "useTheme": "{name} 테마 사용",
+      "language": "언어",
+      "useLocale": "{name} 사용"
     },
     "security": {
       "title": "로그인 & 보안",
