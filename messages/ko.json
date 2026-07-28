@@ -359,6 +359,7 @@
         "notes": "메모",
         "custom": "커스텀 필드",
         "deals": "딜",
+        "tags": "태그",
         "noTags": "태그 없음",
         "noDeals": "딜 없음",
         "addNotePlaceholder": "메모 추가..."
@@ -1501,6 +1502,7 @@
       "appearance": "화면 설정",
       "whatsapp": "WhatsApp",
       "templates": "템플릿",
+      "quick-replies": "빠른 답장",
       "fields": "필드 & 태그",
       "deals": "딜 & 통화",
       "members": "팀원",
