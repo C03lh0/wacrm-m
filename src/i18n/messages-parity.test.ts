@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import en from '../../messages/en.json';
 import ptBR from '../../messages/pt-BR.json';
 import ko from '../../messages/ko.json';
+import { SUPPORTED_LOCALES } from '@/lib/i18n/locales';
 
 function flattenKeys(value: unknown, prefix = ''): string[] {
   if (typeof value !== 'object' || value === null) {
@@ -36,4 +39,13 @@ describe('translation key parity against messages/en.json', () => {
       extra: [],
     });
   });
+});
+
+describe('every SUPPORTED_LOCALES entry ships a dictionary file', () => {
+  for (const { code } of SUPPORTED_LOCALES) {
+    it(`messages/${code}.json exists on disk`, () => {
+      const path = join(process.cwd(), 'messages', `${code}.json`);
+      expect(existsSync(path)).toBe(true);
+    });
+  }
 });

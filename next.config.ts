@@ -117,12 +117,26 @@ const nextConfig: NextConfig = {
    *     chunk-hash drift self-heals within ~5 min with no user-
    *     visible latency.
    *
-   *   Note: dynamic dashboard routes (/inbox, /contacts, /pipelines,
-   *   /broadcasts, etc.) are server-rendered per request — Next.js
-   *   and Supabase auth already prevent them from being served
-   *   from a shared cache. The s-maxage here is a ceiling; Next.js
-   *   and auth middleware still set `private` / `no-store` for
-   *   per-user responses.
+   *   Note: this used to say only the auth-gated dashboard routes
+   *   (/inbox, /contacts, /pipelines, /broadcasts, etc.) were dynamic
+   *   and thus already shielded from a shared cache by Next.js /
+   *   Supabase auth. That's no longer the whole picture: locale
+   *   resolution (src/i18n/request.ts) reads the NEXT_LOCALE cookie
+   *   inside getRequestConfig, which the root layout depends on — so
+   *   EVERY route, including the ~20 previously-static marketing/auth
+   *   pages (/, /login, /signup, /dashboard, /contacts, etc.), now
+   *   renders dynamically per request and embeds locale-specific text
+   *   in the HTML. A shared cache (CDN) honoring the s-maxage/
+   *   stale-while-revalidate below with no `Vary` would key purely on
+   *   URL and could serve one visitor's cookie-selected-locale HTML to
+   *   a different visitor with a different NEXT_LOCALE cookie for up
+   *   to 5 min (or up to 24 h under stale-while-revalidate). The
+   *   `Vary: Cookie` header on the rule below is what makes the
+   *   s-maxage strategy safe again: it tells any shared cache to key
+   *   entries on Cookie (including NEXT_LOCALE), not just the path.
+   *   The s-maxage here is still a ceiling; Next.js and auth
+   *   middleware still set `private` / `no-store` for per-user
+   *   responses.
    *
    * Security headers are appended via a separate catch-all rule
    * below — Next.js merges headers from every matching rule, so
@@ -142,6 +156,15 @@ const nextConfig: NextConfig = {
             key: "Cache-Control",
             value:
               "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
+          },
+          {
+            // Required now that this response's HTML content varies by
+            // the NEXT_LOCALE cookie (see the strategy note above): a
+            // shared cache must treat requests with different Cookie
+            // values as distinct cache entries, or it can serve one
+            // visitor's locale to another.
+            key: "Vary",
+            value: "Cookie",
           },
         ],
       },

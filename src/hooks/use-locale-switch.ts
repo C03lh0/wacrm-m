@@ -3,6 +3,7 @@
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale } from 'next-intl';
+import { toast } from 'sonner';
 
 import type { Locale } from '@/lib/i18n/locales';
 
@@ -29,11 +30,18 @@ export function useLocaleSwitch(): UseLocaleSwitch {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ locale: next }),
-    }).then(() => {
-      startTransition(() => {
-        router.refresh();
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Failed to switch language');
+        }
+        startTransition(() => {
+          router.refresh();
+        });
+      })
+      .catch(() => {
+        toast.error('Could not switch language. Try again?');
       });
-    });
   };
 
   return { currentLocale, switchLocale, isPending };
