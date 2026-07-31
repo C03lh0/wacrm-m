@@ -40,8 +40,10 @@ export function SettingsOverview({
     useAuth();
   const { mode, theme } = useTheme();
   const t = useTranslations('Settings.overview');
-  const tRoles = useTranslations('roles');
+  const tRoles = useTranslations('Settings.roles');
   const tSections = useTranslations('Settings.sections');
+  const tCurrencies = useTranslations('Settings.deals.currencies');
+  const tThemes = useTranslations('Settings.appearance.themes');
 
   const [counts, setCounts] = useState<OverviewCounts | null>(null);
   const [countsLoading, setCountsLoading] = useState(true);
@@ -146,9 +148,12 @@ export function SettingsOverview({
   const roleMeta = accountRole ? ROLE_META[accountRole] : null;
   const RoleIcon = roleMeta?.icon;
 
-  const currencyLabel =
-    CURRENCIES.find((c) => c.code === defaultCurrency)?.label ?? defaultCurrency;
-  const themeName = THEMES.find((t) => t.id === theme)?.name ?? theme;
+  const currencyLabel = CURRENCIES.find((c) => c.code === defaultCurrency)
+    ? tCurrencies(defaultCurrency)
+    : defaultCurrency;
+  const themeName = THEMES.find((tObj) => tObj.id === theme)
+    ? tThemes(`${theme}.name`)
+    : theme;
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   // Per-tile loading + subtitle. `null` counts render as a graceful

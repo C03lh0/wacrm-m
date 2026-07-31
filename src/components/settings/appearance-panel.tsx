@@ -26,6 +26,7 @@ export function AppearancePanel() {
   const { theme, setTheme, mode, setMode } = useTheme();
   const { currentLocale, switchLocale } = useLocaleSwitch();
   const t = useTranslations("Settings.appearance");
+  const tThemes = useTranslations("Settings.appearance.themes");
 
   return (
     <section className="max-w-3xl animate-in fade-in-50 duration-200">
@@ -67,8 +68,8 @@ export function AppearancePanel() {
             <ThemeCard
               key={tObj.id}
               id={tObj.id}
-              name={tObj.name}
-              tagline={tObj.tagline}
+              name={tThemes(`${tObj.id}.name`)}
+              tagline={tThemes(`${tObj.id}.tagline`)}
               swatch={tObj.swatch}
               isActive={tObj.id === theme}
               onPick={() => setTheme(tObj.id)}

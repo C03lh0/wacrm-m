@@ -58,8 +58,12 @@ export type ActivityKind =
 export interface ActivityItem {
   id: string
   kind: ActivityKind
-  /** Primary line of text rendered in the feed. Pre-formatted. */
-  text: string
+  /**
+   * Raw interpolation values for the feed's ICU message, keyed by
+   * `kind` (see `buildText` in activity-feed.tsx) — never
+   * pre-formatted English text, so the row can render in any locale.
+   */
+  params: Record<string, string | number | boolean | null>
   /** ISO timestamp the item happened at, drives relative-time + sort. */
   at: string
   /** Optional deep-link for the whole row (not all items have a target). */

@@ -90,7 +90,26 @@
       "timeS": "há {sec}s",
       "timeM": "há {min}min",
       "timeH": "há {hr}h",
-      "timeD": "há {day}d"
+      "timeD": "há {day}d",
+      "items": {
+        "newMessage": "Nova mensagem de {who}",
+        "newContact": "Novo contato: {name}",
+        "dealInStage": "Negócio \"{title}\" em {stage}",
+        "dealUpdated": "Negócio \"{title}\" atualizado",
+        "broadcastSent": "Transmissão \"{name}\" enviada para {count} contatos",
+        "broadcastOther": "Transmissão \"{name}\" {status} ({count} destinatários)",
+        "automationTriggered": "Automação \"{name}\" disparada para {who}",
+        "automationFailed": "Automação \"{name}\" falhou para {who}",
+        "unknownContact": "Desconhecido",
+        "unknownAutomation": "Automação",
+        "broadcastStatus": {
+          "draft": "rascunho",
+          "scheduled": "agendada",
+          "sending": "enviando",
+          "sent": "enviada",
+          "failed": "falhou"
+        }
+      }
     },
     "conversationsChart": {
       "title": "Conversas ao longo do tempo",
@@ -120,7 +139,16 @@
       "thisWeek": "Esta semana:",
       "lastWeek": "Semana passada:",
       "noReplies": "Ainda não há respostas registradas",
-      "noRepliesHint": "Este gráfico se preenche conforme você responde às mensagens dos clientes."
+      "noRepliesHint": "Este gráfico se preenche conforme você responde às mensagens dos clientes.",
+      "dow": {
+        "mon": "Seg",
+        "tue": "Ter",
+        "wed": "Qua",
+        "thu": "Qui",
+        "fri": "Sex",
+        "sat": "Sáb",
+        "sun": "Dom"
+      }
     },
     "emptyState": {
       "title": "Ainda não há dados suficientes"
@@ -586,6 +614,16 @@
       "lostThisMonth": "Perdidos este mês",
       "lostThisMonthTooltip": "Negócios marcados como perdidos desde o primeiro dia do mês atual.",
       "howCalculated": "Como {label} é calculado"
+    },
+    "defaults": {
+      "stages": {
+        "newLead": "Novo lead",
+        "qualified": "Qualificado",
+        "proposalSent": "Proposta enviada",
+        "negotiation": "Negociação",
+        "won": "Ganho"
+      },
+      "pipelineName": "Funil de vendas"
     }
   },
   "Broadcasts": {
@@ -974,6 +1012,30 @@
         "matchContains": "Contém",
         "matchExact": "Exata",
         "closeConversationHint": "Define o status da conversa como \"encerrada\". Nenhuma configuração necessária."
+      },
+      "badgeCondition": "Condição",
+      "badgeWait": "Aguardar",
+      "badgeAction": "Ação",
+      "delete": "Excluir",
+      "moveUp": "Mover para cima",
+      "moveDown": "Mover para baixo"
+    },
+    "templates": {
+      "welcome_message": {
+        "name": "Mensagem de boas-vindas",
+        "description": "Responde automaticamente com uma saudação para contatos novos."
+      },
+      "out_of_office": {
+        "name": "Fora do expediente",
+        "description": "Responde automaticamente fora do horário de atendimento para ninguém ficar esperando."
+      },
+      "lead_qualifier": {
+        "name": "Qualificador de leads",
+        "description": "Faz perguntas de qualificação para filtrar leads recebidos."
+      },
+      "follow_up_reminder": {
+        "name": "Lembrete de acompanhamento",
+        "description": "Envia um lembrete se o contato não responder em 24 horas."
       }
     }
   },
@@ -1197,6 +1259,20 @@
       "modeRemove": "Remover",
       "tagPicked": "{mode} etiqueta {tag}…",
       "tagNone": "{mode} etiqueta (nenhuma escolhida)"
+    },
+    "templates": {
+      "welcome_menu": {
+        "name": "Menu de boas-vindas",
+        "description": "Recebe clientes que digitam uma palavra-chave e os direciona para o agente certo, dependendo se são novos ou já existentes."
+      },
+      "faq_bot": {
+        "name": "Bot de perguntas frequentes",
+        "description": "Responde perguntas comuns automaticamente. O cliente escolhe um tópico em uma lista; o bot responde e encerra."
+      },
+      "lead_capture": {
+        "name": "Captura de leads",
+        "description": "Recebe contatos de primeira mensagem, coleta nome + e-mail + empresa e transfere para vendas com as respostas na nota."
+      }
     }
   },
   "Settings": {
@@ -1562,7 +1638,29 @@
       "accentColor": "Cor de destaque",
       "useTheme": "Usar tema {name}",
       "language": "Idioma",
-      "useLocale": "Usar {name}"
+      "useLocale": "Usar {name}",
+      "themes": {
+        "violet": {
+          "name": "Violeta",
+          "tagline": "O padrão — confiante, com um toque descontraído."
+        },
+        "emerald": {
+          "name": "Esmeralda",
+          "tagline": "Remete a crescimento, sem copiar o verde do WhatsApp."
+        },
+        "cobalt": {
+          "name": "Cobalto",
+          "tagline": "Azul limpo de SaaS B2B — calmo e com cara de produto."
+        },
+        "amber": {
+          "name": "Âmbar",
+          "tagline": "Quente e amigável — combina com times de PMEs."
+        },
+        "rose": {
+          "name": "Rosa",
+          "tagline": "Ousado e moderno — D2C, economia criativa, estilo de vida."
+        }
+      }
     },
     "security": {
       "title": "Login e segurança",
@@ -1604,7 +1702,16 @@
       "newKeyTitle": "Nova chave de API",
       "newKeyDesc": "Nomeie-a de acordo com a integração que a usará e conceda apenas os escopos necessários.",
       "done": "Concluído",
-      "networkError": "Não foi possível conectar ao servidor"
+      "networkError": "Não foi possível conectar ao servidor",
+      "scopeDescriptions": {
+        "messages:send": "Enviar mensagens do WhatsApp",
+        "messages:read": "Ler mensagens e o status de entrega delas",
+        "contacts:read": "Listar e ler contatos",
+        "contacts:write": "Criar e atualizar contatos",
+        "conversations:read": "Listar e ler conversas",
+        "broadcasts:send": "Disparar campanhas de transmissão",
+        "webhooks:manage": "Registrar e gerenciar webhooks de eventos de saída"
+      }
     },
     "deals": {
       "title": "Negócios e moeda",
@@ -1616,7 +1723,24 @@
       "save": "Salvar",
       "saving": "Salvando...",
       "saveFailed": "Falha ao salvar moeda padrão",
-      "saveSuccess": "Moeda padrão atualizada"
+      "saveSuccess": "Moeda padrão atualizada",
+      "currencies": {
+        "USD": "Dólar americano",
+        "EUR": "Euro",
+        "GBP": "Libra esterlina",
+        "INR": "Rupia indiana",
+        "AUD": "Dólar australiano",
+        "CAD": "Dólar canadense",
+        "BRL": "Real brasileiro",
+        "JPY": "Iene japonês",
+        "CNY": "Yuan chinês",
+        "AED": "Dirham dos Emirados Árabes Unidos",
+        "ZAR": "Rand sul-africano",
+        "NGN": "Naira nigeriana",
+        "SGD": "Dólar de Singapura",
+        "MXN": "Peso mexicano",
+        "COP": "Peso colombiano"
+      }
     },
     "aiConfig": {
       "title": "Configuração do agente",
@@ -1684,6 +1808,79 @@
       "reindex": "Reindexar",
       "reindexTooltip": "Regerar embeddings de todos os documentos (ex.: após adicionar uma chave de embeddings)",
       "loading": "Carregando…"
+    },
+    "quickReplies": {
+      "toastNameRequired": "Dê um nome para a resposta rápida.",
+      "toastSaveFailed": "Não foi possível salvar a resposta rápida.",
+      "toastUpdated": "Resposta rápida atualizada.",
+      "toastCreated": "Resposta rápida criada.",
+      "toastDeleteFailed": "Não foi possível excluir a resposta rápida.",
+      "confirmDelete": "Excluir esta resposta rápida?",
+      "title": "Respostas rápidas",
+      "description": "Trechos reutilizáveis — texto simples ou uma mensagem interativa salva — que os agentes podem inserir pelo campo de mensagem da caixa de entrada.",
+      "newButton": "Nova resposta rápida",
+      "emptyState": "Nenhuma resposta rápida ainda. Crie uma para reutilizar em várias conversas.",
+      "editTitle": "Editar resposta rápida",
+      "createTitle": "Nova resposta rápida",
+      "fieldName": "Nome",
+      "fieldText": "Texto",
+      "fieldInteractive": "Interativo",
+      "placeholderName": "ex: Horário de atendimento",
+      "placeholderText": "O texto da mensagem a inserir",
+      "cancel": "Cancelar",
+      "save": "Salvar"
     }
+  },
+  "Notifications": {
+    "title": "Notificações",
+    "description": "Conversas que outros membros da equipe atribuem a você aparecem aqui.",
+    "markAllRead": "Marcar tudo como lido",
+    "emptyTitle": "Nenhuma notificação ainda",
+    "emptyHint": "Você verá um aviso aqui quando alguém atribuir uma conversa a você.",
+    "toastMarkReadFailed": "Não foi possível marcar a notificação como lida",
+    "toastMarkAllFailed": "Não foi possível marcar tudo como lido",
+    "retry": "Tentar novamente",
+    "unreadAriaLabel": "Não lida",
+    "timeS": "há {sec}s",
+    "timeM": "há {min}min",
+    "timeH": "há {hr}h",
+    "timeD": "há {day}d"
+  },
+  "Agents": {
+    "title": "Agentes de IA",
+    "subtitle": "Seu agente de IA com chave própria — configure e teste no playground antes que ele responda aos clientes na caixa de entrada.",
+    "tabPlayground": "Playground",
+    "tabSetup": "Configuração",
+    "tabUsage": "Uso"
+  },
+  "AiPlayground": {
+    "header": "Playground",
+    "subtitle": "— teste respostas como se você fosse um cliente",
+    "reset": "Reiniciar",
+    "emptyTitle": "Envie uma mensagem para ver como seu agente responderia.",
+    "emptyHint": "Ele usa sua base de conhecimento e se comporta exatamente como o bot de resposta automática — incluindo transferência para humano.",
+    "goToSetup": "Ainda não configurado? Ir para Configuração",
+    "handoffNotice": "Transferiria para um humano aqui",
+    "thinking": "Pensando…",
+    "inputPlaceholder": "Digite uma mensagem de cliente…",
+    "toastNotConfigured": "Nenhum agente configurado ainda — finalize a Configuração primeiro.",
+    "toastReplyFailed": "Não foi possível obter uma resposta.",
+    "toastUnreachable": "Não foi possível conectar ao agente."
+  },
+  "AiUsage": {
+    "toastLoadFailed": "Não foi possível carregar o uso",
+    "title": "Uso de tokens",
+    "description": "Tokens gastos na sua chave de provedor por rascunhos e pelo bot de resposta automática. Apenas contagens — nenhum conteúdo de mensagem é armazenado aqui.",
+    "windowDays": "Últimos {days} dias",
+    "emptyState": "Ainda não há uso de IA nos últimos {days} dias.",
+    "emptyHint": "Isso é preenchido conforme o assistente cria rascunhos e responde automaticamente.",
+    "totalTokens": "Total de tokens",
+    "llmCalls": "Chamadas de LLM",
+    "autoReply": "Resposta automática",
+    "drafts": "Rascunhos",
+    "tokensPerDay": "Tokens por dia",
+    "byModel": "Por modelo",
+    "modelTokensCalls": "{tokens} tok · {count, plural, =1 {chamada} other {chamadas}}",
+    "truncatedHint": "Mostrando uma janela parcial — o uso é alto o suficiente para que apenas os registros mais recentes sejam resumidos aqui."
   }
 }
