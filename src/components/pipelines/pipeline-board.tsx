@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/currency";
+import { translateDefaultStageName } from "@/lib/pipelines/default-names";
 import { useTranslations } from "next-intl";
 
 interface PipelineBoardProps {
@@ -202,6 +203,7 @@ function StageColumn({
   onEditDeal: (deal: Deal) => void;
 }) {
   const t = useTranslations("Pipelines.board");
+  const tDefaults = useTranslations("Pipelines.defaults");
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
 
   return (
@@ -219,7 +221,7 @@ function StageColumn({
       />
       <div className="flex items-center justify-between pt-3">
         <h3 className="truncate text-sm font-semibold text-foreground">
-          {stage.name}
+          {translateDefaultStageName(stage.name, tDefaults)}
         </h3>
         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
           {deals.length}

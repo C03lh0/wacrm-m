@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { ActivityItem, ActivityKind } from '@/lib/dashboard/types'
+import { relativeTime } from '@/lib/relative-time'
 import { cn } from '@/lib/utils'
 import { EmptyState } from './empty-state'
 import { Skeleton } from './skeleton'
@@ -42,6 +43,7 @@ import { useTranslations } from 'next-intl'
 
 export function ActivityFeed({ items, loading }: ActivityFeedProps) {
   const t = useTranslations('Dashboard.activityFeed')
+  const tItems = useTranslations('Dashboard.activityFeed.items')
   // Start at 5 — a quick scan of the most recent events without
   // dominating vertical real estate. User expands explicitly via the
   // footer control when they want deeper history.
@@ -103,7 +105,7 @@ export function ActivityFeed({ items, loading }: ActivityFeedProps) {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                    {it.text}
+                    {buildText(it, tItems)}
                   </span>
                   <span className="flex-shrink-0 text-xs text-muted-foreground tabular-nums">
                     {relativeTime(it.at, t)}
@@ -157,13 +159,42 @@ export function ActivityFeed({ items, loading }: ActivityFeedProps) {
   )
 }
 
-function relativeTime(iso: string, t: ReturnType<typeof useTranslations>): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const diffSec = Math.round((Date.now() - then) / 1000)
-  if (diffSec < 60) return t('timeS', { sec: Math.max(1, diffSec) })
-  if (diffSec < 3600) return t('timeM', { min: Math.floor(diffSec / 60) })
-  if (diffSec < 86400) return t('timeH', { hr: Math.floor(diffSec / 3600) })
-  if (diffSec < 2_592_000) return t('timeD', { day: Math.floor(diffSec / 86400) })
-  return new Date(iso).toLocaleDateString()
+/**
+ * Builds the feed row's primary line from an item's `kind` + `params`
+ * via an ICU message per kind — never pre-formatted English text, so
+ * this is the only place that needs to know how each kind reads.
+ * `t` should be scoped to `Dashboard.activityFeed.items`.
+ */
+function buildText(item: ActivityItem, t: ReturnType<typeof useTranslations>): string {
+  const p = item.params
+  switch (item.kind) {
+    case 'message':
+      return t('newMessage', { who: (p.who as string) || t('unknownContact') })
+    case 'contact':
+      return t('newContact', { name: p.name as string })
+    case 'deal':
+      return p.stage
+        ? t('dealInStage', { title: p.title as string, stage: p.stage as string })
+        : t('dealUpdated', { title: p.title as string })
+    case 'broadcast':
+      return p.sent
+        ? t('broadcastSent', { name: p.name as string, count: p.count as number })
+        : t('broadcastOther', {
+            name: p.name as string,
+            status: t(`broadcastStatus.${p.status as string}`),
+            count: p.count as number,
+          })
+    case 'automation':
+      return p.failed
+        ? t('automationFailed', {
+            name: (p.name as string) || t('unknownAutomation'),
+            who: (p.who as string) || t('unknownContact'),
+          })
+        : t('automationTriggered', {
+            name: (p.name as string) || t('unknownAutomation'),
+            who: (p.who as string) || t('unknownContact'),
+          })
+    default:
+      return ''
+  }
 }

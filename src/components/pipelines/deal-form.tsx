@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { translateDefaultStageName } from "@/lib/pipelines/default-names";
 
 interface DealFormProps {
   open: boolean;
@@ -54,6 +55,7 @@ export function DealForm({
   onSaved,
 }: DealFormProps) {
   const t = useTranslations("Pipelines.form");
+  const tDefaults = useTranslations("Pipelines.defaults");
   const supabase = createClient();
   const { accountId, defaultCurrency } = useAuth();
 
@@ -344,7 +346,7 @@ export function DealForm({
               >
                 {stages.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name}
+                    {translateDefaultStageName(s.name, tDefaults)}
                   </option>
                 ))}
               </select>
