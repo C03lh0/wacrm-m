@@ -11,7 +11,7 @@ interface RealtimeEvent<T> {
   old: Partial<T>;
 }
 
-/** whatsapp_connections row shape (migration 037) — Evolution QR/status flow. */
+/** whatsapp_connections row shape (migration 040) — Evolution QR/status flow. */
 export interface WhatsAppConnectionRow {
   id: string;
   account_id: string;

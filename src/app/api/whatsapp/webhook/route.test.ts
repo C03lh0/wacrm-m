@@ -371,7 +371,7 @@ describe('inbound webhook: inbound media is mirrored (#466)', () => {
     })
   })
 
-  it('mirrors when the column is absent, e.g. a row read before migration 039', async () => {
+  it('mirrors when the column is absent, e.g. a row read before migration 042', async () => {
     h.state.mirrorInboundMedia = undefined
 
     await runWebhook(IMAGE_MESSAGE)

@@ -24,7 +24,7 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS opted_out_at TIMESTAMPTZ;
 -- Supports the broadcast-recipient-resolution filter cheaply. Partial
 -- index — most contacts are never opted out, so indexing only the
 -- ones that are keeps this small (mirrors the style of
--- messages_dedup_key in migration 038).
+-- messages_dedup_key in migration 041).
 CREATE INDEX IF NOT EXISTS idx_contacts_opted_out
   ON contacts(opted_out_at)
   WHERE opted_out_at IS NOT NULL;

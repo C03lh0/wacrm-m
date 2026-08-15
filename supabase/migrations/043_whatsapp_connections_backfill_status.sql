@@ -1,5 +1,5 @@
 -- ============================================================
--- 040_whatsapp_connections_backfill_status
+-- 043_whatsapp_connections_backfill_status
 --
 -- Adds an `is_syncing` flag to whatsapp_connections so the inbox UI can
 -- show a blocking "syncing..." overlay while the post-reconnect

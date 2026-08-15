@@ -232,7 +232,7 @@ export interface Message {
   /**
    * MIME type of `media_url`'s content, as Meta reported it. Inbound
    * media only — outbound URLs already carry a filename and extension.
-   * Null on every row written before migration 039.
+   * Null on every row written before migration 042.
    */
   media_type?: string | null;
   template_name?: string;
@@ -298,7 +298,7 @@ export interface WhatsAppConfig {
    * When true (the default), the inbound webhook copies received media
    * into the `chat-media` bucket so attachments outlive Meta's ~30-day
    * retention. Turning it off keeps storage flat and accepts that
-   * inbound attachments expire. Migration 039.
+   * inbound attachments expire. Migration 042.
    */
   mirror_inbound_media?: boolean;
 }
