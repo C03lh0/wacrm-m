@@ -69,12 +69,19 @@ function normalizeEventName(event: string | undefined): string {
  * ASSUMPTION: this depends on the target Evolution deployment actually
  * forwarding custom `webhook.headers` on delivery — confirm against
  * your instance (see docs/evolution-api.md). When the connection has
- * no webhook_secret stored, or the deployment doesn't forward the
- * header, verification is skipped rather than failing closed —
- * instance_name in the URL path is still an unguessable-enough routing
- * key on its own, but this is weaker than Meta's HMAC verification.
- * Every reconnect mints a fresh instance + secret, so exposure from a
- * skipped check is bounded to that connection's lifetime.
+ * no webhook_secret stored, verification is skipped rather than
+ * failing closed — instance_name in the URL path is still an
+ * unguessable-enough routing key on its own, but this is weaker than
+ * Meta's HMAC verification. Every reconnect mints a fresh instance +
+ * secret, so exposure from a skipped check is bounded to that
+ * connection's lifetime.
+ *
+ * A connection that DOES have a webhook_secret but fails to decrypt
+ * it (corrupted ciphertext, rotated ENCRYPTION_KEY, ...) is NOT
+ * treated the same as "no secret configured" — the caller sees a
+ * generic 401 rather than being let through, since a decrypt failure
+ * means we genuinely can't verify the caller and silently accepting
+ * would defeat the point of having a secret at all.
  */
 function verifyEvolutionWebhookAuth(request: Request, expectedSecret: string | null): boolean {
   if (!expectedSecret) return true
@@ -110,14 +117,19 @@ export async function POST(
   }
 
   let expectedSecret: string | null = null
+  let secretDecryptFailed = false
   if (connection.webhook_secret) {
     try {
       expectedSecret = decrypt(connection.webhook_secret)
     } catch (err) {
       console.error('[evolution] failed to decrypt webhook_secret:', err)
+      secretDecryptFailed = true
     }
   }
-  if (!verifyEvolutionWebhookAuth(request, expectedSecret)) {
+  // A decrypt failure must fail closed even though a missing secret
+  // fails open (see verifyEvolutionWebhookAuth's doc comment) — an
+  // undecryptable secret means we can't verify the caller at all.
+  if (secretDecryptFailed || !verifyEvolutionWebhookAuth(request, expectedSecret)) {
     console.warn(`[evolution] rejected webhook with invalid auth for instance: ${instanceName}`)
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
   }
