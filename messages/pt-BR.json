@@ -156,7 +156,9 @@
   },
   "Inbox": {
     "page": {
-      "whatsappNotConnected": "O WhatsApp® não está conectado. Acesse Configurações para conectar sua conta."
+      "whatsappNotConnected": "O WhatsApp® não está conectado. Acesse Configurações para conectar sua conta.",
+      "syncingMessagesTitle": "Sincronizando mensagens...",
+      "syncingMessagesSubtitle": "Isso pode levar alguns instantes."
     },
     "conversationList": {
       "searchPlaceholder": "Buscar conversas...",
@@ -245,7 +247,12 @@
       "interactiveReply": "[Resposta interativa]",
       "unsupported": "[Tipo de mensagem não suportado]",
       "aiBadge": "IA",
-      "aiBadgeTitle": "Enviado automaticamente pelo assistente de IA"
+      "aiBadgeTitle": "Enviado automaticamente pelo assistente de IA",
+      "download": "Baixar",
+      "downloadFailed": "Não foi possível baixar o anexo",
+      "viewImage": "Ver imagem",
+      "expandVideo": "Expandir vídeo",
+      "imageAlt": "Imagem compartilhada"
     },
     "actions": {
       "reply": "Responder",
@@ -378,7 +385,9 @@
       "dupSimilar": "Já existe um contato com um número muito parecido.",
       "loadingTags": "Carregando etiquetas...",
       "noTagsAvailable": "Nenhuma etiqueta disponível. Crie etiquetas em Configurações.",
-      "phoneRequired": "O número de telefone é obrigatório"
+      "phoneRequired": "O número de telefone é obrigatório",
+      "optedOutLabel": "Optou por não receber transmissões",
+      "optedOutHint": "Este contato será ignorado por toda transmissão, independente do público."
     },
     "detailView": {
       "tabs": {
@@ -400,6 +409,7 @@
       "contactInfo": "Informações do contato",
       "unnamed": "Desconhecido",
       "contactDetailsDesc": "Dados do contato",
+      "optedOutBadge": "Optou por não receber transmissões",
       "phone": "Telefone",
       "email": "E-mail",
       "company": "Empresa",
@@ -720,7 +730,9 @@
         "subtitle": "Selecione um modelo de mensagem aprovado para sua transmissão.",
         "noTemplates": "Nenhum modelo disponível.",
         "createFirst": "Crie um modelo em Configurações primeiro.",
-        "errorLoad": "Falha ao carregar modelos"
+        "errorLoad": "Falha ao carregar modelos",
+        "evolutionTitle": "Modelos não estão disponíveis na Evolution",
+        "evolutionBody": "Transmissões exigem o sistema de modelos aprovados da Meta. Esta conta está conectada via Evolution (WhatsApp Web), que não tem equivalente."
       },
       "selectAudience": {
         "title": "Selecionar público",
@@ -803,7 +815,14 @@
         "sending": "Enviando...",
         "preparing": "Preparando...",
         "progressDesc": "Processando {current} de {total} destinatários...",
-        "toastFailedPreview": "Falha ao carregar dados de pré-visualização"
+        "toastFailedPreview": "Falha ao carregar dados de pré-visualização",
+        "timingSendNow": "Enviar agora",
+        "timingSchedule": "Agendar para depois",
+        "scheduleAtLabel": "Enviar em",
+        "schedulePast": "Escolha um horário no futuro",
+        "scheduleBroadcast": "Agendar transmissão",
+        "confirmScheduleTitle": "Confirmar transmissão agendada",
+        "confirmScheduleBody": "Esta transmissão será enviada para {count} contatos usando o modelo {template} em {time}."
       }
     }
   },
@@ -964,7 +983,8 @@
         "languageLabel": "Idioma",
         "select": "Selecione um modelo…",
         "unknown": "{name} ({lang}) — não está na lista aprovada",
-        "unknownLang": "desconhecido"
+        "unknownLang": "desconhecido",
+        "evolutionUnsupported": "Modelos não são suportados em contas conectadas via Evolution. Este passo não será executado até a conta usar a Meta."
       },
       "branches": {
         "yes": "Sim",
@@ -1035,7 +1055,7 @@
       },
       "follow_up_reminder": {
         "name": "Lembrete de acompanhamento",
-        "description": "Envia um lembrete se o contato não responder em 24 horas."
+        "description": "Envia uma mensagem de modelo após 24h de silêncio — modelos funcionam fora da janela de sessão da Meta, ao contrário de uma resposta comum."
       }
     }
   },
@@ -1427,9 +1447,9 @@
       "headerImage": "Imagem",
       "headerVideo": "Vídeo",
       "headerDocument": "Documento",
-      "headerTextPlaceholder": "Texto do cabeçalho (máx. 60 caracteres, {{1}} opcional)",
+      "headerTextPlaceholder": "Texto do cabeçalho (máx. 60 caracteres, '{{1}}' opcional)",
       "headerSampleAria": "Valor de exemplo para a variável do cabeçalho",
-      "headerSamplePlaceholder": "Valor de exemplo para {{1}} (obrigatório para revisão da Meta)",
+      "headerSamplePlaceholder": "Valor de exemplo para '{{1}}' (obrigatório para revisão da Meta)",
       "uploadImage": "Enviar imagem",
       "uploadHint": "JPEG ou PNG, ≤5 MB",
       "mediaUrlPlaceholder": "https://… (ou cole um link {format} público)",
@@ -1438,8 +1458,8 @@
       "videoHint": " Recomendado: MP4 / 3GPP, ≤16 MB, ≤60 segundos.",
       "documentHint": " Recomendado: PDF, ≤100 MB.",
       "bodyText": "Texto do corpo",
-      "bodyPlaceholder": "Olá {{1}}, seu pedido {{2}} está confirmado.",
-      "bodyHint": "Use {{1}}, {{2}} para variáveis (devem ser contíguas, começando em {{1}}).",
+      "bodyPlaceholder": "Olá '{{1}}', seu pedido '{{2}}' está confirmado.",
+      "bodyHint": "Use '{{1}}', '{{2}}' para variáveis (devem ser contíguas, começando em '{{1}}').",
       "sampleValues": "Valores de exemplo (a Meta os usa para revisar seu modelo)",
       "sampleAria": "Valor de exemplo para a variável do corpo {var}",
       "samplePlaceholder": "Exemplo para {var}",
@@ -1453,8 +1473,8 @@
       "btnPhone": "Telefone",
       "btnCopyCode": "Copiar código",
       "btnLabelPlaceholder": "Rótulo do botão",
-      "urlPlaceholder": "https://exemplo.com/caminho ou com sufixo {{1}}",
-      "urlSamplePlaceholder": "Valor de exemplo para {{1}} (obrigatório quando a URL tem uma variável)",
+      "urlPlaceholder": "https://exemplo.com/caminho ou com sufixo '{{1}}'",
+      "urlSamplePlaceholder": "Valor de exemplo para '{{1}}' (obrigatório quando a URL tem uma variável)",
       "phonePlaceholder": "+15551234567",
       "codePlaceholder": "Código de exemplo (ex.: SUMMER20)",
       "cancel": "Cancelar",
@@ -1550,16 +1570,52 @@
       "step2_3": "Siga o assistente de configuração para vincular sua empresa",
       "step3": "Obter credenciais da API",
       "step3_1": "Acesse WhatsApp > Configuração da API",
-      "step3_2": "Copie seu <strong class=\"text-foreground\">ID do número de telefone</strong>",
-      "step3_3": "Copie seu <strong class=\"text-foreground\">ID da conta comercial do WhatsApp</strong>",
-      "step3_4": "Gere um <strong class=\"text-foreground\">Token de acesso permanente</strong> em Configurações de negócios > Usuários do sistema",
+      "step3_2": "Copie seu <strong>ID do número de telefone</strong>",
+      "step3_3": "Copie seu <strong>ID da conta comercial do WhatsApp</strong>",
+      "step3_4": "Gere um <strong>Token de acesso permanente</strong> em Configurações de negócios > Usuários do sistema",
       "step4": "Configurar webhooks",
       "step4_1": "Acesse WhatsApp > Configuração",
       "step4_2": "Clique em \"Editar\" na seção Webhook",
-      "step4_3": "Cole a <strong class=\"text-foreground\">URL de retorno do webhook</strong> acima",
-      "step4_4": "Informe o mesmo <strong class=\"text-foreground\">Token de verificação</strong> definido aqui",
+      "step4_3": "Cole a <strong>URL de retorno do webhook</strong> acima",
+      "step4_4": "Informe o mesmo <strong>Token de verificação</strong> definido aqui",
       "step4_5": "Inscreva-se no campo de webhook \"messages\"",
-      "metaDocs": "Documentação da API do WhatsApp da Meta"
+      "metaDocs": "Documentação da API do WhatsApp da Meta",
+      "switchProvider": "Usar outra forma de conectar",
+      "picker": {
+        "title": "Conectar WhatsApp",
+        "description": "Escolha como esta conta se conecta ao WhatsApp.",
+        "metaTitle": "WhatsApp Oficial",
+        "metaDesc": "API oficial Cloud API da Meta. Suporta modelos de mensagem e botões/listas interativos.",
+        "evolutionTitle": "WhatsApp via QR Code",
+        "evolutionDesc": "Conecte um número de WhatsApp escaneando um QR code (Evolution API). Não requer aprovação de modelos.",
+        "choose": "Escolher"
+      },
+      "evolution": {
+        "title": "WhatsApp via QR Code",
+        "description": "Conecte um número de WhatsApp escaneando um QR code.",
+        "connect": "Conectar WhatsApp",
+        "connecting": "Criando conexão...",
+        "waitingForScan": "Aguardando leitura...",
+        "scanInstructions": "Abra o WhatsApp no seu celular, vá em Configurações → Aparelhos conectados → Conectar aparelho, e escaneie este código.",
+        "qrExpired": "O QR code expirou.",
+        "refreshQr": "Gerar novo QR code",
+        "refreshingQr": "Atualizando...",
+        "connectedTitle": "WhatsApp conectado",
+        "disconnectedTitle": "WhatsApp desconectado",
+        "disconnectedDescription": "Sua conexão anterior foi desconectada (por exemplo, você desvinculou o aparelho pelo celular). Reconecte escaneando um novo QR code — o histórico de conversas foi mantido.",
+        "reconnect": "Reconectar WhatsApp",
+        "reconnecting": "Gerando QR code...",
+        "provider": "Provedor",
+        "providerName": "Evolution API",
+        "phoneNumber": "Número",
+        "disconnect": "Desconectar",
+        "disconnecting": "Desconectando...",
+        "disconnectConfirmTitle": "Desconectar o WhatsApp?",
+        "disconnectConfirmDesc": "O histórico de conversas é mantido. Você pode reconectar o mesmo número depois.",
+        "errorGeneric": "Algo deu errado ao conectar o WhatsApp. Tente novamente.",
+        "notSupported": "Este tipo de mensagem não é suportado na conexão via QR code.",
+        "backToPicker": "Escolher outra conexão"
+      }
     },
     "sections": {
       "overview": "Visão geral",

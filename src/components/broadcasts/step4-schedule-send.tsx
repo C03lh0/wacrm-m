@@ -28,6 +28,9 @@ interface Step4Props {
   onNameChange: (name: string) => void;
   template: MessageTemplate;
   audience: AudienceConfig;
+  /** ISO datetime-local value ("" = send now). */
+  scheduledAt: string;
+  onScheduledAtChange: (value: string) => void;
   onSend: () => void;
   onSaveDraft?: () => void;
   onBack: () => void;
@@ -40,6 +43,8 @@ export function Step4ScheduleSend({
   onNameChange,
   template,
   audience,
+  scheduledAt,
+  onScheduledAtChange,
   onSend,
   onSaveDraft,
   onBack,
@@ -50,6 +55,10 @@ export function Step4ScheduleSend({
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
+  const isScheduling = scheduledAt !== '';
+  // datetime-local has no timezone — new Date(value) parses it in the
+  // browser's local zone, which is exactly what the user picked.
+  const scheduledInPast = isScheduling && new Date(scheduledAt) <= new Date();
 
   useEffect(() => {
     async function calculateReach() {
@@ -110,6 +119,54 @@ export function Step4ScheduleSend({
           placeholder={t('scheduleSend.broadcastNamePlaceholder')}
           className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
         />
+      </div>
+
+      {/* Send timing */}
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-foreground">
+          {t('scheduleSend.scheduleAtLabel')}
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border border-border bg-muted p-0.5">
+            <button
+              type="button"
+              onClick={() => onScheduledAtChange('')}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                !isScheduling
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t('scheduleSend.timingSendNow')}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onScheduledAtChange(
+                  scheduledAt || defaultScheduleValue(),
+                )
+              }
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                isScheduling
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t('scheduleSend.timingSchedule')}
+            </button>
+          </div>
+          {isScheduling && (
+            <Input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => onScheduledAtChange(e.target.value)}
+              className="w-auto border-border bg-muted text-foreground"
+            />
+          )}
+        </div>
+        {scheduledInPast && (
+          <p className="mt-1.5 text-xs text-red-400">{t('scheduleSend.schedulePast')}</p>
+        )}
       </div>
 
       {/* Summary Card */}
@@ -191,23 +248,35 @@ export function Step4ScheduleSend({
           <DialogTrigger
             render={
               <Button
-                disabled={!name.trim() || isProcessing}
+                disabled={!name.trim() || isProcessing || scheduledInPast}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               />
             }
           >
             <Send className="h-4 w-4" />
-            {t('scheduleSend.sendNow')}
+            {isScheduling ? t('scheduleSend.scheduleBroadcast') : t('scheduleSend.sendNow')}
           </DialogTrigger>
           <DialogContent className="border-border bg-popover sm:max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-popover-foreground">Confirm Broadcast</DialogTitle>
+              <DialogTitle className="text-popover-foreground">
+                {isScheduling ? t('scheduleSend.confirmScheduleTitle') : 'Confirm Broadcast'}
+              </DialogTitle>
               <DialogDescription className="text-muted-foreground">
-                You are about to send this broadcast to{' '}
-                <span className="font-medium text-popover-foreground">{estimatedReach.toLocaleString()}</span>{' '}
-                contacts using the{' '}
-                <span className="font-medium text-popover-foreground">{template.name}</span> template.
-                This action cannot be undone.
+                {isScheduling ? (
+                  t('scheduleSend.confirmScheduleBody', {
+                    count: estimatedReach.toLocaleString(),
+                    template: template.name,
+                    time: new Date(scheduledAt).toLocaleString(),
+                  })
+                ) : (
+                  <>
+                    You are about to send this broadcast to{' '}
+                    <span className="font-medium text-popover-foreground">{estimatedReach.toLocaleString()}</span>{' '}
+                    contacts using the{' '}
+                    <span className="font-medium text-popover-foreground">{template.name}</span> template.
+                    This action cannot be undone.
+                  </>
+                )}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -226,7 +295,7 @@ export function Step4ScheduleSend({
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 <Send className="h-4 w-4" />
-                {t('scheduleSend.sendNow')}
+                {isScheduling ? t('scheduleSend.scheduleBroadcast') : t('scheduleSend.sendNow')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -235,4 +304,12 @@ export function Step4ScheduleSend({
       </div>
     </div>
   );
+}
+
+/** One hour from now, formatted for `<input type="datetime-local">`. */
+function defaultScheduleValue(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setSeconds(0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

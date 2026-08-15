@@ -99,12 +99,14 @@ vi.mock("./admin-client", () => {
 });
 
 vi.mock("./meta-send", () => ({
-  engineSendText: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
-  engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
-  engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
+  engineSendText: vi.fn(async () => ({ whatsapp_message_id: "m1", provider: "meta" })),
+  engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1", provider: "meta" })),
+  engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1", provider: "meta" })),
 }));
 
 import { runAutomationsForTrigger, triggerMatches } from "./engine";
+import { engineSendTemplate } from "./meta-send";
+import { SendMessageError } from "@/lib/whatsapp/send-message-error";
 import type { Automation, KeywordMatchTriggerConfig } from "@/types";
 
 const ACCOUNT = "acct-1";
@@ -274,6 +276,62 @@ describe("update_contact_field — custom fields", () => {
 
     expect(h.state.upsertCalls).toHaveLength(0);
     expect(h.state.updateCalls).toHaveLength(0);
+  });
+});
+
+describe("send_template — skipped, not failed, when the provider can't send it (Evolution)", () => {
+  it("marks the step 'skipped', still runs later steps, and finalizes the log as 'partial'", async () => {
+    vi.mocked(engineSendTemplate).mockRejectedValueOnce(
+      new SendMessageError(
+        "unsupported_message_type_for_provider",
+        "Template messages are not supported on evolution.",
+        400,
+      ),
+    );
+
+    h.state.owned = { id: "c1" };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      {
+        id: "s1",
+        automation_id: "a1",
+        step_type: "send_template",
+        position: 0,
+        parent_step_id: null,
+        step_config: { template_name: "order_update", language: "en_US" },
+      },
+      {
+        id: "s2",
+        automation_id: "a1",
+        step_type: "update_contact_field",
+        position: 1,
+        parent_step_id: null,
+        step_config: { field: "company", value: "after-skip" },
+      },
+    ];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { conversation_id: "conv-1" },
+    });
+
+    // The later step still ran — a skipped step must not abort the automation.
+    expect(h.state.updateCalls).toHaveLength(1);
+
+    const withStatus = h.state.logUpdates.filter((u) => "status" in u);
+    expect(withStatus.at(-1)).toMatchObject({ status: "partial" });
+
+    const lastLogUpdate = h.state.logUpdates.at(-1) as {
+      steps_executed: { step_id: string; status: string }[];
+    };
+    expect(lastLogUpdate.steps_executed).toContainEqual(
+      expect.objectContaining({ step_id: "s1", status: "skipped" }),
+    );
+    expect(lastLogUpdate.steps_executed).toContainEqual(
+      expect.objectContaining({ step_id: "s2", status: "success" }),
+    );
   });
 });
 

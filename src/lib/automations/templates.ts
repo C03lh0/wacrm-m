@@ -108,7 +108,8 @@ export const AUTOMATION_TEMPLATES: Record<TemplateSlug, AutomationTemplateDefini
   follow_up_reminder: {
     slug: 'follow_up_reminder',
     name: 'Follow-up Reminder',
-    description: 'Send a nudge if a contact has not replied within 24 hours.',
+    description:
+      "Sends a template message after 24h of silence — templates work outside Meta's session window, unlike a plain reply.",
     trigger_type: 'new_message_received',
     trigger_config: {},
     steps: [
@@ -116,12 +117,17 @@ export const AUTOMATION_TEMPLATES: Record<TemplateSlug, AutomationTemplateDefini
         step_type: 'wait',
         step_config: { amount: 1, unit: 'days' },
       },
+      // A plain send_message here would be rejected by Meta's Cloud API:
+      // free-text sends are only allowed *inside* the 24h customer-
+      // service window, and this step fires exactly at that boundary.
+      // send_template is the correct re-engagement mechanism outside the
+      // window. template_name is left blank on purpose — the empty
+      // value fails validateStepsForActivation's existing
+      // "template name is required" check, forcing the user to pick an
+      // approved template before this automation can be activated.
       {
-        step_type: 'send_message',
-        step_config: {
-          text:
-            "Just circling back — did you have any other questions for us? Happy to help!",
-        },
+        step_type: 'send_template',
+        step_config: { template_name: '', language: 'en_US' },
       },
     ],
   },

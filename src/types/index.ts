@@ -113,6 +113,9 @@ export interface Contact {
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
    *  Inbox conversation list, for tag filtering). Absent otherwise. */
   tags?: Tag[];
+  /** Set when the contact opted out of broadcasts (migration 039).
+   *  Null/absent means "not opted out" — today's implicit default. */
+  opted_out_at?: string | null;
 }
 
 export interface Tag {

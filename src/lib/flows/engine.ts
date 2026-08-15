@@ -42,6 +42,7 @@ import {
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
+import { SendMessageError } from "@/lib/whatsapp/send-message-error";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -739,7 +740,24 @@ async function advanceFromNodeKey(
       continue;
     }
     if (node.node_type === "send_buttons") {
-      await sendButtonsAndSuspend(db, run, node);
+      try {
+        await sendButtonsAndSuspend(db, run, node);
+      } catch (err) {
+        const isUnsupported =
+          err instanceof SendMessageError &&
+          err.code === "unsupported_message_type_for_provider";
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: isUnsupported ? "unsupported_provider" : "send_buttons_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(
+          db,
+          run.id,
+          "failed",
+          isUnsupported ? "unsupported_provider" : "send_buttons_failed",
+        );
+        return { outcome: "completed" };
+      }
       // Persist the new current_node_key via optimistic UPDATE.
       const advanced = await advanceCurrentNodeKey(
         db,
@@ -755,7 +773,24 @@ async function advanceFromNodeKey(
       return { outcome: "advanced" };
     }
     if (node.node_type === "send_list") {
-      await sendListAndSuspend(db, run, node);
+      try {
+        await sendListAndSuspend(db, run, node);
+      } catch (err) {
+        const isUnsupported =
+          err instanceof SendMessageError &&
+          err.code === "unsupported_message_type_for_provider";
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: isUnsupported ? "unsupported_provider" : "send_list_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(
+          db,
+          run.id,
+          "failed",
+          isUnsupported ? "unsupported_provider" : "send_list_failed",
+        );
+        return { outcome: "completed" };
+      }
       const advanced = await advanceCurrentNodeKey(
         db,
         run.id,
@@ -1012,9 +1047,37 @@ async function handleReplyForActiveRun(
   if (action.type === "reprompt") {
     // Re-send the same prompt. Same node, no current_node_key change.
     if (currentNode.node_type === "send_buttons") {
-      await sendButtonsAndSuspend(db, run, currentNode);
+      try {
+        await sendButtonsAndSuspend(db, run, currentNode);
+      } catch (err) {
+        const isUnsupported =
+          err instanceof SendMessageError &&
+          err.code === "unsupported_message_type_for_provider";
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: isUnsupported ? "unsupported_provider" : "reprompt_send_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        if (isUnsupported) {
+          await endRun(db, run.id, "failed", "unsupported_provider");
+          return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+        }
+      }
     } else if (currentNode.node_type === "send_list") {
-      await sendListAndSuspend(db, run, currentNode);
+      try {
+        await sendListAndSuspend(db, run, currentNode);
+      } catch (err) {
+        const isUnsupported =
+          err instanceof SendMessageError &&
+          err.code === "unsupported_message_type_for_provider";
+        await logEvent(db, run.id, "error", currentNode.node_key, {
+          reason: isUnsupported ? "unsupported_provider" : "reprompt_send_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        if (isUnsupported) {
+          await endRun(db, run.id, "failed", "unsupported_provider");
+          return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+        }
+      }
     } else if (currentNode.node_type === "collect_input") {
       // Customer typed something we couldn't accept (empty after trim,
       // or var_key missing — rare). Re-send the prompt so they try again.

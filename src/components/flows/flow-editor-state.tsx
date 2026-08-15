@@ -53,6 +53,7 @@ import { useTranslations } from "next-intl";
 import { unlinkNodeReferences } from "@/lib/flows/edges";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
+import { useWhatsAppConnectionStatus } from "@/hooks/use-whatsapp-connection-status";
 
 // ============================================================
 // State shape
@@ -239,6 +240,7 @@ export function FlowEditorProvider({
 }: ProviderProps) {
   const router = useRouter();
   const t = useTranslations("Flows.editorState");
+  const { status: connectionStatus } = useWhatsAppConnectionStatus();
 
   const [state, setStateRaw] = useState<BuilderState>(() => ({
     name: initialFlow.name,
@@ -320,8 +322,9 @@ export function FlowEditorProvider({
           entry_node_id: state.entry_node_id,
         },
         state.nodes,
+        connectionStatus.provider,
       ),
-    [state],
+    [state, connectionStatus.provider],
   );
   const canActivate = useMemo(
     () => issues.every((i) => i.severity !== "error"),

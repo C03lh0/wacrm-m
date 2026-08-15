@@ -24,6 +24,7 @@ import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
 import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
+import { SendMessageError } from '@/lib/whatsapp/send-message-error'
 
 // ------------------------------------------------------------
 // Public API
@@ -335,12 +336,27 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      // A step that can't run on this account's provider (e.g.
+      // send_template/send_buttons/send_list on Evolution, which has
+      // no template-approval workflow or native interactive message
+      // type) is skipped, not failed — later steps (add_tag, etc.)
+      // are still meaningful and should still run.
+      const isUnsupported =
+        err instanceof SendMessageError &&
+        err.code === 'unsupported_message_type_for_provider'
       results.push({
         step_id: step.id,
         step_type: step.step_type,
-        status: 'failed',
+        status: isUnsupported ? 'skipped' : 'failed',
         detail: msg,
       })
+      if (isUnsupported) {
+        // A real failure earlier in this scope would already have
+        // broken out of the loop, so status can only be 'success' or
+        // 'partial' here.
+        status = 'partial'
+        continue
+      }
       status = 'failed'
       errorMessage = msg
       break
@@ -365,14 +381,14 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const text = interpolate(cfg.text, args)
       if (!text.trim()) throw new Error('send_message has empty text')
       const conversationId = await resolveConversationId(args)
-      const { whatsapp_message_id } = await engineSendText({
+      const { whatsapp_message_id, provider } = await engineSendText({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
         text,
       })
-      return `sent via Meta (${whatsapp_message_id})`
+      return `sent via ${provider} (${whatsapp_message_id})`
     }
 
     case 'send_buttons':
@@ -385,14 +401,14 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const check = validateInteractivePayload(payload)
       if (!check.ok) throw new Error(check.error)
       const conversationId = await resolveConversationId(args)
-      const { whatsapp_message_id } = await engineSendInteractive({
+      const { whatsapp_message_id, provider } = await engineSendInteractive({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
         payload,
       })
-      return `interactive sent via Meta (${whatsapp_message_id})`
+      return `interactive sent via ${provider} (${whatsapp_message_id})`
     }
 
     case 'send_template': {
@@ -418,7 +434,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
             })
             .map((k) => String(cfg.variables![k]))
         : []
-      const { whatsapp_message_id } = await engineSendTemplate({
+      const { whatsapp_message_id, provider } = await engineSendTemplate({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
@@ -427,7 +443,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         language: cfg.language,
         params,
       })
-      return `template sent via Meta (${whatsapp_message_id})`
+      return `template sent via ${provider} (${whatsapp_message_id})`
     }
 
     case 'add_tag': {

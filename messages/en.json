@@ -156,7 +156,9 @@
   },
   "Inbox": {
     "page": {
-      "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account."
+      "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account.",
+      "syncingMessagesTitle": "Syncing messages...",
+      "syncingMessagesSubtitle": "This may take a few moments."
     },
     "conversationList": {
       "searchPlaceholder": "Search conversations...",
@@ -396,7 +398,9 @@
       "dupSimilar": "A contact with a very similar number already exists.",
       "loadingTags": "Loading tags...",
       "noTagsAvailable": "No tags available. Create tags in Settings.",
-      "phoneRequired": "Phone number is required"
+      "phoneRequired": "Phone number is required",
+      "optedOutLabel": "Opted out of broadcasts",
+      "optedOutHint": "This contact will be skipped by every broadcast, regardless of audience."
     },
     "detailView": {
       "tabs": {
@@ -418,6 +422,7 @@
       "contactInfo": "Contact Information",
       "unnamed": "Unknown",
       "contactDetailsDesc": "Contact details",
+      "optedOutBadge": "Opted out of broadcasts",
       "name": "Name",
       "phone": "Phone",
       "email": "Email",
@@ -739,7 +744,9 @@
         "subtitle": "Select an approved message template for your broadcast.",
         "noTemplates": "No templates available.",
         "createFirst": "Create a template in Settings first.",
-        "errorLoad": "Failed to load templates"
+        "errorLoad": "Failed to load templates",
+        "evolutionTitle": "Templates aren't available on Evolution",
+        "evolutionBody": "Broadcasts require Meta's approved-template system. This account is connected via Evolution (WhatsApp Web), which has no equivalent."
       },
       "selectAudience": {
         "title": "Select Audience",
@@ -822,7 +829,14 @@
         "sending": "Sending...",
         "preparing": "Preparing...",
         "progressDesc": "Processing {current} of {total} recipients...",
-        "toastFailedPreview": "Failed to load preview data"
+        "toastFailedPreview": "Failed to load preview data",
+        "timingSendNow": "Send now",
+        "timingSchedule": "Schedule for later",
+        "scheduleAtLabel": "Send at",
+        "schedulePast": "Pick a time in the future",
+        "scheduleBroadcast": "Schedule Broadcast",
+        "confirmScheduleTitle": "Confirm Scheduled Broadcast",
+        "confirmScheduleBody": "This broadcast will be sent to {count} contacts using the {template} template at {time}."
       }
     }
   },
@@ -983,7 +997,8 @@
         "languageLabel": "Language",
         "select": "Select a template…",
         "unknown": "{name} ({lang}) — not in approved list",
-        "unknownLang": "unknown"
+        "unknownLang": "unknown",
+        "evolutionUnsupported": "Templates aren't supported on Evolution-connected accounts. This step won't run until the account is on Meta."
       },
       "branches": {
         "yes": "Yes",
@@ -1056,7 +1071,7 @@
       },
       "follow_up_reminder": {
         "name": "Follow-up Reminder",
-        "description": "Send a nudge if a contact has not replied within 24 hours."
+        "description": "Sends a template message after 24h of silence — templates work outside Meta's session window, unlike a plain reply."
       }
     }
   },
@@ -1448,9 +1463,9 @@
       "headerImage": "Image",
       "headerVideo": "Video",
       "headerDocument": "Document",
-      "headerTextPlaceholder": "Header text (max 60 chars, optional {{1}})",
+      "headerTextPlaceholder": "Header text (max 60 chars, optional '{{1}}')",
       "headerSampleAria": "Sample value for header variable",
-      "headerSamplePlaceholder": "Sample value for {{1}} (required for Meta review)",
+      "headerSamplePlaceholder": "Sample value for '{{1}}' (required for Meta review)",
       "uploadImage": "Upload image",
       "uploadHint": "JPEG or PNG, ≤5 MB",
       "mediaUrlPlaceholder": "https://… (or paste a public {format} link)",
@@ -1459,8 +1474,8 @@
       "videoHint": " Recommended: MP4 / 3GPP, ≤16 MB, ≤60 seconds.",
       "documentHint": " Recommended: PDF, ≤100 MB.",
       "bodyText": "Body Text",
-      "bodyPlaceholder": "Hello {{1}}, your order {{2}} is confirmed.",
-      "bodyHint": "Use {{1}}, {{2}} for variables (must be contiguous starting at {{1}}).",
+      "bodyPlaceholder": "Hello '{{1}}', your order '{{2}}' is confirmed.",
+      "bodyHint": "Use '{{1}}', '{{2}}' for variables (must be contiguous starting at '{{1}}').",
       "sampleValues": "Sample values (Meta uses these to review your template)",
       "sampleAria": "Sample value for body variable {var}",
       "samplePlaceholder": "Sample for {var}",
@@ -1474,8 +1489,8 @@
       "btnPhone": "Phone",
       "btnCopyCode": "Copy Code",
       "btnLabelPlaceholder": "Button label",
-      "urlPlaceholder": "https://example.com/path or with {{1}} suffix",
-      "urlSamplePlaceholder": "Example value for {{1}} (required when URL has a variable)",
+      "urlPlaceholder": "https://example.com/path or with '{{1}}' suffix",
+      "urlSamplePlaceholder": "Example value for '{{1}}' (required when URL has a variable)",
       "phonePlaceholder": "+15551234567",
       "codePlaceholder": "Example code (e.g. SUMMER20)",
       "cancel": "Cancel",
@@ -1571,16 +1586,52 @@
       "step2_3": "Follow the setup wizard to link your business",
       "step3": "Get API Credentials",
       "step3_1": "Go to WhatsApp > API Setup",
-      "step3_2": "Copy your <strong class=\"text-foreground\">Phone Number ID</strong>",
-      "step3_3": "Copy your <strong class=\"text-foreground\">WhatsApp Business Account ID</strong>",
-      "step3_4": "Generate a <strong class=\"text-foreground\">Permanent Access Token</strong> from Business Settings > System Users",
+      "step3_2": "Copy your <strong>Phone Number ID</strong>",
+      "step3_3": "Copy your <strong>WhatsApp Business Account ID</strong>",
+      "step3_4": "Generate a <strong>Permanent Access Token</strong> from Business Settings > System Users",
       "step4": "Configure Webhooks",
       "step4_1": "Go to WhatsApp > Configuration",
       "step4_2": "Click \"Edit\" on the Webhook section",
-      "step4_3": "Paste the <strong class=\"text-foreground\">Webhook Callback URL</strong> from above",
-      "step4_4": "Enter the same <strong class=\"text-foreground\">Verify Token</strong> you set here",
+      "step4_3": "Paste the <strong>Webhook Callback URL</strong> from above",
+      "step4_4": "Enter the same <strong>Verify Token</strong> you set here",
       "step4_5": "Subscribe to \"messages\" webhook field",
-      "metaDocs": "Meta WhatsApp API Documentation"
+      "metaDocs": "Meta WhatsApp API Documentation",
+      "switchProvider": "Use a different way to connect",
+      "picker": {
+        "title": "Connect WhatsApp",
+        "description": "Choose how this account connects to WhatsApp.",
+        "metaTitle": "WhatsApp Official",
+        "metaDesc": "Meta's official Cloud API. Supports message templates and interactive buttons/lists.",
+        "evolutionTitle": "WhatsApp via QR Code",
+        "evolutionDesc": "Connect a WhatsApp number by scanning a QR code (Evolution API). No template approval required.",
+        "choose": "Choose"
+      },
+      "evolution": {
+        "title": "WhatsApp via QR Code",
+        "description": "Connect a WhatsApp number by scanning a QR code.",
+        "connect": "Connect WhatsApp",
+        "connecting": "Creating connection...",
+        "waitingForScan": "Waiting for scan...",
+        "scanInstructions": "Open WhatsApp on your phone, go to Settings → Linked devices → Link a device, and scan this code.",
+        "qrExpired": "QR code expired.",
+        "refreshQr": "Generate new QR code",
+        "refreshingQr": "Refreshing...",
+        "connectedTitle": "WhatsApp connected",
+        "disconnectedTitle": "WhatsApp disconnected",
+        "disconnectedDescription": "Your previous connection was disconnected (e.g. you unlinked the device from your phone). Reconnect by scanning a new QR code — your conversation history was kept.",
+        "reconnect": "Reconnect WhatsApp",
+        "reconnecting": "Generating QR code...",
+        "provider": "Provider",
+        "providerName": "Evolution API",
+        "phoneNumber": "Number",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting...",
+        "disconnectConfirmTitle": "Disconnect WhatsApp?",
+        "disconnectConfirmDesc": "Your conversation history is kept. You can reconnect the same number later.",
+        "errorGeneric": "Something went wrong connecting WhatsApp. Please try again.",
+        "notSupported": "This message type is not supported on the QR-code connection.",
+        "backToPicker": "Choose a different connection"
+      }
     },
     "sections": {
       "overview": "Overview",

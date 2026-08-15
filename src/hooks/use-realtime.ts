@@ -11,10 +11,28 @@ interface RealtimeEvent<T> {
   old: Partial<T>;
 }
 
+/** whatsapp_connections row shape (migration 037) — Evolution QR/status flow. */
+export interface WhatsAppConnectionRow {
+  id: string;
+  account_id: string;
+  provider: "evolution";
+  status: "created" | "connecting" | "qr_required" | "connected" | "disconnected" | "error";
+  phone_number: string | null;
+  display_name: string | null;
+  qr_code: string | null;
+  qr_expires_at: string | null;
+  last_error: string | null;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  is_syncing: boolean;
+}
+
 interface UseRealtimeOptions {
   channelName: string;
   onMessageEvent?: (event: RealtimeEvent<Message>) => void;
   onConversationEvent?: (event: RealtimeEvent<Conversation>) => void;
+  /** Fires on any change to the account's whatsapp_connections row — drives the QR/connect UI without polling. */
+  onConnectionEvent?: (event: RealtimeEvent<WhatsAppConnectionRow>) => void;
   enabled?: boolean;
 }
 
@@ -22,6 +40,7 @@ export function useRealtime({
   channelName,
   onMessageEvent,
   onConversationEvent,
+  onConnectionEvent,
   enabled = true,
 }: UseRealtimeOptions) {
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -34,9 +53,11 @@ export function useRealtime({
   // callbacks, which always run after the render that updates it.
   const onMessageRef = useRef(onMessageEvent);
   const onConversationRef = useRef(onConversationEvent);
+  const onConnectionRef = useRef(onConnectionEvent);
   useEffect(() => {
     onMessageRef.current = onMessageEvent;
     onConversationRef.current = onConversationEvent;
+    onConnectionRef.current = onConnectionEvent;
   });
 
   useEffect(() => {
@@ -65,6 +86,17 @@ export function useRealtime({
             eventType: payload.eventType as RealtimeEvent<Conversation>["eventType"],
             new: payload.new as Conversation,
             old: payload.old as Partial<Conversation>,
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "whatsapp_connections" },
+        (payload) => {
+          onConnectionRef.current?.({
+            eventType: payload.eventType as RealtimeEvent<WhatsAppConnectionRow>["eventType"],
+            new: payload.new as WhatsAppConnectionRow,
+            old: payload.old as Partial<WhatsAppConnectionRow>,
           });
         }
       )

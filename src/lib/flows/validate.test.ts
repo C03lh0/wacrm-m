@@ -516,6 +516,75 @@ describe("validateFlowForActivation — send_media", () => {
   });
 });
 
+describe("validateFlowForActivation — provider gating (Evolution)", () => {
+  it("does not flag send_buttons/send_list when no provider is given (Meta or unknown)", () => {
+    const issues = validateFlowForActivation(validFlow, validNodes);
+    expect(issues.some((i) => i.node_key === "menu")).toBe(false);
+  });
+
+  it("does not flag send_buttons/send_list for an explicit 'meta' provider", () => {
+    const issues = validateFlowForActivation(validFlow, validNodes, "meta");
+    expect(issues.some((i) => i.node_key === "menu")).toBe(false);
+  });
+
+  it("flags a send_buttons node as unsupported on an Evolution-connected account", () => {
+    const issues = validateFlowForActivation(validFlow, validNodes, "evolution");
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        severity: "error",
+        scope: "node",
+        node_key: "menu",
+        message: "Send-buttons nodes aren't supported on Evolution-connected accounts.",
+      }),
+    );
+  });
+
+  it("flags a send_list node the same way", () => {
+    const nodes = [
+      { node_key: "start", node_type: "start", config: { next_node_key: "list" } },
+      {
+        node_key: "list",
+        node_type: "send_list",
+        config: {
+          text: "Pick an order",
+          button_label: "View",
+          sections: [
+            { title: "Recent", rows: [{ reply_id: "o1", title: "Order 1", next_node_key: "ho" }] },
+          ],
+        },
+      },
+      { node_key: "ho", node_type: "handoff", config: {} },
+    ];
+    const issues = validateFlowForActivation(
+      { ...validFlow, entry_node_id: "start" },
+      nodes,
+      "evolution",
+    );
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        severity: "error",
+        scope: "node",
+        node_key: "list",
+        message: "Send-list nodes aren't supported on Evolution-connected accounts.",
+      }),
+    );
+  });
+
+  it("does not flag provider-agnostic node types on Evolution", () => {
+    const nodes = [
+      { node_key: "start", node_type: "start", config: { next_node_key: "msg" } },
+      { node_key: "msg", node_type: "send_message", config: { text: "hi", next_node_key: "end" } },
+      { node_key: "end", node_type: "end", config: {} },
+    ];
+    const issues = validateFlowForActivation(
+      { ...validFlow, entry_node_id: "start" },
+      nodes,
+      "evolution",
+    );
+    expect(issues).toEqual([]);
+  });
+});
+
 describe("reachableFromEntry", () => {
   it("walks the graph from the entry", () => {
     const set = reachableFromEntry("start", validNodes);

@@ -10,11 +10,12 @@ import {
 } from "@/lib/inbox/conversations";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
+import type { WhatsAppConnectionStatus } from "@/lib/whatsapp/connection-status";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
-import { WifiOff } from "lucide-react";
+import { Loader2, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
@@ -48,9 +49,8 @@ function InboxPageInner() {
     useState<Conversation | null>(null);
   const [activeContact, setActiveContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
-    null
-  );
+  const [whatsappStatus, setWhatsappStatus] =
+    useState<WhatsAppConnectionStatus | null>(null);
   /**
    * Bumped whenever we want children (ConversationList, MessageThread)
    * to refetch from the DB — used as a safety net against missed
@@ -172,45 +172,22 @@ function InboxPageInner() {
     }
   }, []);
 
-  // Check WhatsApp connection status on mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-
-      if (!user) return;
-
-      // whatsapp_config is one-row-per-account post-multi-user, so
-      // the previous `.eq('user_id', user.id)` would miss the row
-      // for any teammate who didn't personally save the config —
-      // the "WhatsApp not connected" banner would show in the
-      // shared inbox even though the admin had it configured.
-      // Resolve account_id via the profile and query by that.
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("account_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      const accountId = profile?.account_id as string | undefined;
-      if (!accountId) {
-        setWhatsappConnected(false);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("whatsapp_config")
-        .select("status")
-        .eq("account_id", accountId)
-        .maybeSingle();
-
-      setWhatsappConnected(data?.status === "connected");
-    };
-
-    checkConnection();
+  // Check WhatsApp connection status on mount — provider-agnostic
+  // (Meta or Evolution) via the single status source, so the banner
+  // and the 24h session-window rule (passed down to MessageThread
+  // below) both reflect whichever provider the account actually uses.
+  const refreshWhatsappStatus = useCallback(async () => {
+    const status = await fetch("/api/whatsapp/status", { cache: "no-store" })
+      .then((r) => r.json())
+      .catch(() => null);
+    setWhatsappStatus(
+      status ?? { provider: null, connected: false, enforcesSessionWindow: false, syncing: false }
+    );
   }, []);
+
+  useEffect(() => {
+    refreshWhatsappStatus();
+  }, [refreshWhatsappStatus]);
 
   // Handle realtime message events
   const handleMessageEvent = useCallback(
@@ -345,6 +322,7 @@ function InboxPageInner() {
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
     onConversationEvent: handleConversationEvent,
+    onConnectionEvent: refreshWhatsappStatus,
     enabled: true,
   });
 
@@ -565,7 +543,7 @@ function InboxPageInner() {
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
-      {whatsappConnected === false && (
+      {whatsappStatus?.connected === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
           <WifiOff className="h-4 w-4 text-amber-400" />
           <p className="text-xs text-amber-400">
@@ -574,7 +552,16 @@ function InboxPageInner() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {whatsappStatus?.syncing && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/95">
+            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            <div className="text-center">
+              <p className="text-sm font-medium">{t("syncingMessagesTitle")}</p>
+              <p className="text-xs text-muted-foreground">{t("syncingMessagesSubtitle")}</p>
+            </div>
+          </div>
+        )}
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
@@ -623,6 +610,7 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            sessionWindowApplies={whatsappStatus?.enforcesSessionWindow ?? true}
           />
         </div>
 

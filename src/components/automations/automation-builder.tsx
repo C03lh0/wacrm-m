@@ -63,6 +63,8 @@ import {
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { useWhatsAppConnectionStatus } from "@/hooks/use-whatsapp-connection-status"
+import type { ProviderName } from "@/lib/whatsapp/provider"
 
 // ------------------------------------------------------------
 // Types (builder-local — mirror the flattened rows we POST)
@@ -210,6 +212,11 @@ interface AutomationResources {
   customFields: CustomField[]
   pipelines: PipelineOption[]
   stages: PipelineStageOption[]
+  /** The account's resolved WhatsApp provider — null while loading /
+   *  unconfigured. Evolution has no template-approval workflow, so
+   *  send_template is hidden from the add-step picker and flagged on
+   *  any existing step when this is 'evolution'. */
+  whatsappProvider: ProviderName | null
 }
 
 interface PipelineOption {
@@ -231,6 +238,7 @@ const ResourcesContext = createContext<AutomationResources>({
   customFields: [],
   pipelines: [],
   stages: [],
+  whatsappProvider: null,
 })
 
 function useResources(): AutomationResources {
@@ -244,6 +252,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [pipelines, setPipelines] = useState<PipelineOption[]>([])
   const [stages, setStages] = useState<PipelineStageOption[]>([])
+  const { status: connectionStatus } = useWhatsAppConnectionStatus()
 
   useEffect(() => {
     let cancelled = false
@@ -298,7 +307,15 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
 
   return (
     <ResourcesContext.Provider
-      value={{ tags, members, templates, customFields, pipelines, stages }}
+      value={{
+        tags,
+        members,
+        templates,
+        customFields,
+        pipelines,
+        stages,
+        whatsappProvider: connectionStatus.provider,
+      }}
     >
       {children}
     </ResourcesContext.Provider>
@@ -555,11 +572,23 @@ function SendTemplateFields({
   onChange: (patch: { template_name: string; language: string }) => void
   t: ReturnType<typeof useTranslations>
 }) {
-  const { templates } = useResources()
+  const { templates, whatsappProvider } = useResources()
+
+  // Flags a step built before the account switched to Evolution (or
+  // imported from a template) — new send_template steps are already
+  // hidden from the picker (see AddButton), but an existing one needs
+  // to say why it won't run.
+  const evolutionBanner =
+    whatsappProvider === "evolution" ? (
+      <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-500">
+        {t("templates.evolutionUnsupported")}
+      </p>
+    ) : null
 
   if (templates.length === 0) {
     return (
       <>
+        {evolutionBanner}
         <FieldBlock label={t("templates.templateNameLabel")}>
           <Input
             value={templateName}
@@ -591,31 +620,34 @@ function SendTemplateFields({
   )
 
   return (
-    <FieldBlock label={t("templates.templateLabel")}>
-      <select
-        value={current}
-        onChange={(e) => {
-          const [name, lang] = e.target.value.split("::")
-          onChange({ template_name: name ?? "", language: lang ?? "" })
-        }}
-        className={SELECT_CLASS}
-      >
-        <option value="">{t("templates.select")}</option>
-        {templates.map((tmpl) => {
-          const lang = tmpl.language ?? "en_US"
-          return (
-            <option key={tmpl.id} value={toValue(tmpl.name, lang)}>
-              {tmpl.name} ({lang})
+    <>
+      {evolutionBanner}
+      <FieldBlock label={t("templates.templateLabel")}>
+        <select
+          value={current}
+          onChange={(e) => {
+            const [name, lang] = e.target.value.split("::")
+            onChange({ template_name: name ?? "", language: lang ?? "" })
+          }}
+          className={SELECT_CLASS}
+        >
+          <option value="">{t("templates.select")}</option>
+          {templates.map((tmpl) => {
+            const lang = tmpl.language ?? "en_US"
+            return (
+              <option key={tmpl.id} value={toValue(tmpl.name, lang)}>
+                {tmpl.name} ({lang})
+              </option>
+            )
+          })}
+          {current && !hasMatch && (
+            <option value={current}>
+              {t("templates.unknown", { name: templateName, lang: language || t("templates.unknownLang") })}
             </option>
-          )
-        })}
-        {current && !hasMatch && (
-          <option value={current}>
-            {t("templates.unknown", { name: templateName, lang: language || t("templates.unknownLang") })}
-          </option>
-        )}
-      </select>
-    </FieldBlock>
+          )}
+        </select>
+      </FieldBlock>
+    </>
   )
 }
 
@@ -1248,6 +1280,13 @@ function BranchColumn({
 
 function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
   const t = useTranslations("Automations.builder")
+  const { whatsappProvider } = useResources()
+  // Evolution has no template-approval workflow — see provider.ts.
+  // Don't offer a step type the account can never actually run.
+  const addableSteps =
+    whatsappProvider === "evolution"
+      ? ADDABLE_STEPS.filter((tp) => tp !== "send_template")
+      : ADDABLE_STEPS
   return (
     <div className="relative flex flex-col items-center">
       <div className="h-4 w-[2px] bg-border" aria-hidden />
@@ -1262,7 +1301,7 @@ function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
           align="start"
           className="max-h-80 min-w-56 overflow-y-auto border-border bg-popover"
         >
-          {ADDABLE_STEPS.map((tp) => {
+          {addableSteps.map((tp) => {
             const Icon = STEP_META[tp].icon
             return (
               <DropdownMenuItem key={tp} onClick={() => onPick(tp)}>

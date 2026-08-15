@@ -1,14 +1,12 @@
-import {
-  sendInteractiveButtons,
-  sendInteractiveList,
-  sendMediaMessage,
-  sendTextMessage,
-  type InteractiveButton,
-  type InteractiveListSection,
-  type MediaKind,
+import type {
+  InteractiveButton,
+  InteractiveListSection,
+  MediaKind,
 } from '@/lib/whatsapp/meta-api'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
-import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory'
+import { SendMessageError } from '@/lib/whatsapp/send-message-error'
+import type { ProviderName } from '@/lib/whatsapp/provider'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -18,18 +16,22 @@ import {
 import { supabaseAdmin } from './admin-client'
 
 // ------------------------------------------------------------
-// Flows-side Meta sender (interactive variants).
+// Flows-side sender (text, media, and interactive variants).
 //
-// Mirrors src/lib/automations/meta-send.ts (engineSendText /
-// engineSendTemplate) but emits interactive button + list messages.
-// Kept separate from the automations file so the two engines don't
-// fight over each other's shape — once both stabilize, the
+// Mirrors src/lib/whatsapp/send-message.ts's provider resolution but
+// uses the service-role client (engine has no cookies) and accepts
+// the user / conversation / contact identifiers the engine already
+// has on hand. Kept separate from send-message.ts so the two engines
+// don't fight over each other's shape — once both stabilize, the
 // phone-variant retry + DB persistence are obvious extraction
-// candidates into a shared base.
+// candidates into a shared base. Also used by
+// src/lib/automations/meta-send.ts for interactive sends.
 //
-// PR #1 ships this in isolation: callers don't exist yet. PR #2
-// brings the flow runner online and wires it up. Shipping it now
-// keeps the foundation PR self-contained and unit-testable.
+// Resolves the account's actual provider (Meta or Evolution) via
+// provider-factory.ts rather than assuming Meta; sendInteractiveViaProvider
+// throws `unsupported_message_type_for_provider` for capabilities the
+// resolved provider doesn't support (Evolution has no native
+// interactive message type).
 // ------------------------------------------------------------
 
 interface SendTextEngineArgs {
@@ -64,7 +66,7 @@ interface SendTextEngineArgs {
  */
 export async function engineSendText(
   args: SendTextEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+): Promise<{ whatsapp_message_id: string; provider: ProviderName }> {
   const db = supabaseAdmin()
 
   const { data: contact, error: contactErr } = await db
@@ -82,25 +84,17 @@ export async function engineSendText(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
-
-  const accessToken = decrypt(config.access_token)
+  const { client, kind, connectionId } = await resolveProviderForAccount(
+    db,
+    args.accountId,
+  )
 
   const attempt = async (phone: string): Promise<string> => {
-    const r = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
+    const r = await client.sendText({
       to: phone,
       text: args.text,
     })
-    return r.messageId
+    return r.providerMessageId
   }
 
   const variants = phoneVariants(sanitized)
@@ -131,11 +125,14 @@ export async function engineSendText(
     content_type: 'text',
     content_text: args.text,
     message_id: waMessageId,
+    provider: kind,
+    connection_id: connectionId,
+    provider_message_id: waMessageId,
     status: 'sent',
     ai_generated: args.aiGenerated ?? false,
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`sent but DB insert failed: ${msgErr.message}`)
   }
 
   await db
@@ -147,7 +144,7 @@ export async function engineSendText(
     })
     .eq('id', args.conversationId)
 
-  return { whatsapp_message_id: waMessageId }
+  return { whatsapp_message_id: waMessageId, provider: kind }
 }
 
 interface SendMediaEngineArgs {
@@ -174,7 +171,7 @@ interface SendMediaEngineArgs {
  */
 export async function engineSendMedia(
   args: SendMediaEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+): Promise<{ whatsapp_message_id: string; provider: ProviderName }> {
   const db = supabaseAdmin()
 
   const { data: contact, error: contactErr } = await db
@@ -192,28 +189,20 @@ export async function engineSendMedia(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
-
-  const accessToken = decrypt(config.access_token)
+  const { client, kind, connectionId } = await resolveProviderForAccount(
+    db,
+    args.accountId,
+  )
 
   const attempt = async (phone: string): Promise<string> => {
-    const r = await sendMediaMessage({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
+    const r = await client.sendMedia({
       to: phone,
       kind: args.kind,
       link: args.link,
       caption: args.caption,
       filename: args.filename,
     })
-    return r.messageId
+    return r.providerMessageId
   }
 
   const variants = phoneVariants(sanitized)
@@ -249,10 +238,13 @@ export async function engineSendMedia(
     content_type: args.kind,
     content_text: args.caption ?? null,
     message_id: waMessageId,
+    provider: kind,
+    connection_id: connectionId,
+    provider_message_id: waMessageId,
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`sent but DB insert failed: ${msgErr.message}`)
   }
 
   await db
@@ -264,7 +256,7 @@ export async function engineSendMedia(
     })
     .eq('id', args.conversationId)
 
-  return { whatsapp_message_id: waMessageId }
+  return { whatsapp_message_id: waMessageId, provider: kind }
 }
 
 interface SendInteractiveButtonsEngineArgs {
@@ -303,8 +295,8 @@ interface SendInteractiveListEngineArgs {
  */
 export async function engineSendInteractiveButtons(
   args: SendInteractiveButtonsEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
-  return sendInteractiveViaMeta({ ...args, kind: 'buttons' })
+): Promise<{ whatsapp_message_id: string; provider: ProviderName }> {
+  return sendInteractiveViaProvider({ ...args, kind: 'buttons' })
 }
 
 /**
@@ -313,22 +305,22 @@ export async function engineSendInteractiveButtons(
  */
 export async function engineSendInteractiveList(
   args: SendInteractiveListEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
-  return sendInteractiveViaMeta({ ...args, kind: 'list' })
+): Promise<{ whatsapp_message_id: string; provider: ProviderName }> {
+  return sendInteractiveViaProvider({ ...args, kind: 'list' })
 }
 
 type SendInput =
   | (SendInteractiveButtonsEngineArgs & { kind: 'buttons' })
   | (SendInteractiveListEngineArgs & { kind: 'list' })
 
-async function sendInteractiveViaMeta(
+async function sendInteractiveViaProvider(
   input: SendInput,
-): Promise<{ whatsapp_message_id: string }> {
+): Promise<{ whatsapp_message_id: string; provider: ProviderName }> {
   const db = supabaseAdmin()
 
-  // Scope the contact + whatsapp_config lookups by account_id —
-  // same defense-in-depth rationale as automations/meta-send.ts.
-  // Migration 017 moved both tables to account-scoped tenancy.
+  // Scope the contact lookup by account_id — same defense-in-depth
+  // rationale as automations/meta-send.ts. Migration 017 moved both
+  // tables to account-scoped tenancy.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
@@ -344,33 +336,37 @@ async function sendInteractiveViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', input.accountId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
-
-  const accessToken = decrypt(config.access_token)
+  const { client, kind, connectionId } = await resolveProviderForAccount(
+    db,
+    input.accountId,
+  )
 
   const attempt = async (phone: string): Promise<string> => {
     if (input.kind === 'buttons') {
-      const r = await sendInteractiveButtons({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      if (!client.sendInteractiveButtons) {
+        throw new SendMessageError(
+          'unsupported_message_type_for_provider',
+          `Interactive button messages are not supported on ${client.name}.`,
+          400,
+        )
+      }
+      const r = await client.sendInteractiveButtons({
         to: phone,
         bodyText: input.bodyText,
         buttons: input.buttons,
         headerText: input.headerText,
         footerText: input.footerText,
       })
-      return r.messageId
+      return r.providerMessageId
     }
-    const r = await sendInteractiveList({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
+    if (!client.sendInteractiveList) {
+      throw new SendMessageError(
+        'unsupported_message_type_for_provider',
+        `Interactive list messages are not supported on ${client.name}.`,
+        400,
+      )
+    }
+    const r = await client.sendInteractiveList({
       to: phone,
       bodyText: input.bodyText,
       buttonLabel: input.buttonLabel,
@@ -378,7 +374,7 @@ async function sendInteractiveViaMeta(
       headerText: input.headerText,
       footerText: input.footerText,
     })
-    return r.messageId
+    return r.providerMessageId
   }
 
   // Same phone-variant retry as automations/meta-send.ts. Numbers
@@ -442,10 +438,13 @@ async function sendInteractiveViaMeta(
     content_text: input.bodyText,
     interactive_payload: interactivePayload,
     message_id: waMessageId,
+    provider: kind,
+    connection_id: connectionId,
+    provider_message_id: waMessageId,
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    throw new Error(`sent but DB insert failed: ${msgErr.message}`)
   }
 
   await db
@@ -457,5 +456,5 @@ async function sendInteractiveViaMeta(
     })
     .eq('id', input.conversationId)
 
-  return { whatsapp_message_id: waMessageId }
+  return { whatsapp_message_id: waMessageId, provider: kind }
 }
