@@ -64,6 +64,7 @@ function makeDb(script: Script) {
   const messageInserts: Record<string, unknown>[] = [];
   const conversationUpdates: Record<string, unknown>[] = [];
   const flowRunUpdates: Record<string, unknown>[] = [];
+  const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 
   function builder(table: string) {
     let mode: 'select' | 'insert' | 'update' = 'select';
@@ -127,8 +128,14 @@ function makeDb(script: Script) {
     return b;
   }
 
-  const db = { from: (t: string) => builder(t) } as unknown as SupabaseClient;
-  return { db, messageInserts, conversationUpdates, flowRunUpdates };
+  const db = {
+    from: (t: string) => builder(t),
+    rpc: (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args });
+      return Promise.resolve({ data: null, error: null });
+    },
+  } as unknown as SupabaseClient;
+  return { db, messageInserts, conversationUpdates, flowRunUpdates, rpcCalls };
 }
 
 const RESOLVED: ResolvedContactAndConversation = {
@@ -157,7 +164,7 @@ describe('ingestParsedMessage — idempotency', () => {
   });
 
   it('inserts a new message and dispatches downstream exactly once', async () => {
-    const { db, messageInserts } = makeDb({
+    const { db, messageInserts, rpcCalls } = makeDb({
       existingMessage: null,
       insertedMessageId: 'msg-1',
       priorCustomerMsgCount: 0,
@@ -174,6 +181,15 @@ describe('ingestParsedMessage — idempotency', () => {
       conversation_id: 'conv-1',
       sender_type: 'customer',
     });
+    // Unread bump goes through the atomic RPC (migration 037), not a
+    // read-modify-write of the resolved conversation snapshot — a
+    // concurrent inbound message must never lose an increment (#369).
+    expect(rpcCalls).toEqual([
+      {
+        name: 'bump_conversation_on_inbound',
+        args: { p_conversation_id: 'conv-1', p_last_message_text: 'hello' },
+      },
+    ]);
     expect(dispatchInboundToFlows).toHaveBeenCalledTimes(1);
     expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
     expect(dispatchWebhookEvent).toHaveBeenCalledWith(
@@ -227,6 +243,36 @@ describe('ingestParsedMessage — idempotency', () => {
     expect(r2?.messageId).toBe('msg-2');
     expect(r1?.duplicate).toBe(false);
     expect(r2?.duplicate).toBe(false);
+  });
+});
+
+describe('ingestParsedMessage — automation dispatch is awaited (#368)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('every triggered automation settles before ingestParsedMessage resolves', async () => {
+    let started = 0;
+    let completed = 0;
+    runAutomationsForTrigger.mockImplementation(() => {
+      started++;
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          completed++;
+          resolve();
+        }, 0);
+      });
+    });
+
+    const { db } = makeDb({ existingMessage: null, insertedMessageId: 'msg-1' });
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    // first_inbound_message + new_message_received + keyword_match.
+    expect(started).toBe(3);
+    // If the dispatches were fire-and-forget, `completed` would still be
+    // 0 here — ingestParsedMessage would have resolved before the timers
+    // fired.
+    expect(completed).toBe(3);
   });
 });
 

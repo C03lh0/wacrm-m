@@ -34,6 +34,12 @@ export interface ParsedInboundContent {
   contentType: string
   contentText: string | null
   mediaUrl: string | null
+  /**
+   * The attachment's MIME type (migration 039). Without it the download
+   * path had to guess an extension from the fetched blob, which was only
+   * possible after the bytes were already fetched.
+   */
+  mediaType?: string | null
   /** Interactive button/list tap id, if applicable. Meta-only today. */
   interactiveReplyId?: string | null
 }
@@ -353,6 +359,7 @@ export async function ingestParsedMessage(
       content_type: content.contentType,
       content_text: content.contentText,
       media_url: content.mediaUrl,
+      media_type: content.mediaType ?? null,
       message_id: providerMessageId,
       provider,
       connection_id: connectionId,
@@ -388,15 +395,18 @@ export async function ingestParsedMessage(
     return null
   }
 
-  const { error: convError } = await db
-    .from('conversations')
-    .update({
-      last_message_text: content.contentText || `[${content.contentType}]`,
-      last_message_at: new Date().toISOString(),
-      unread_count: (conversation.unread_count || 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversation.id)
+  // The unread bump is done DB-side (migration 037's
+  // bump_conversation_on_inbound) rather than as a read-modify-write of
+  // the `conversation` snapshot resolved earlier: two inbound messages
+  // for the same conversation can process concurrently, and computing
+  // `snapshot + 1` in the app lets both reads see the same value and
+  // write the same increment, losing one (issue #369). The RPC
+  // increments in a single UPDATE and refreshes the last-message summary
+  // in the same statement.
+  const { error: convError } = await db.rpc('bump_conversation_on_inbound', {
+    p_conversation_id: conversation.id,
+    p_last_message_text: content.contentText || `[${content.contentType}]`,
+  })
 
   if (convError) {
     console.error('[inbound-pipeline] error updating conversation:', convError)

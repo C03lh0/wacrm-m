@@ -61,6 +61,13 @@
   "ModeToggle": {
     "switchMode": "Mudar para o modo {mode}"
   },
+  "AccountAccess": {
+    "unlinkedTitle": "Este usuário não está vinculado a uma conta",
+    "unlinkedBody": "Nada que você alterar será salvo enquanto isso não for resolvido — o banco de dados rejeita toda escrita de um usuário sem conta ou papel definido. Se você foi convidado para uma equipe, peça ao proprietário para reenviar o convite. Em uma instalação self-hosted, verifique se a migration de bootstrap de conta foi executada para este usuário.",
+    "errorTitle": "Não foi possível carregar suas permissões",
+    "errorBody": "O papel da sua conta não carregou, então toda ação é tratada como somente leitura e as alterações não serão salvas. Verifique sua conexão e tente novamente.",
+    "retry": "Tentar novamente"
+  },
   "Dashboard": {
     "page": {
       "title": "Painel",
@@ -254,6 +261,19 @@
       "expandVideo": "Expandir vídeo",
       "imageAlt": "Imagem compartilhada"
     },
+    "mediaViewer": {
+      "counter": "{index} de {total}",
+      "previous": "Anterior",
+      "next": "Próxima",
+      "zoomIn": "Ampliar para tamanho real",
+      "zoomOut": "Ajustar à tela",
+      "openOriginal": "Abrir original",
+      "download": "Baixar",
+      "downloadFailed": "Não foi possível baixar o anexo",
+      "failed": "Este anexo não está mais disponível",
+      "imageAlt": "Imagem compartilhada",
+      "you": "Você"
+    },
     "actions": {
       "reply": "Responder",
       "copyText": "Copiar texto",
@@ -410,6 +430,7 @@
       "unnamed": "Desconhecido",
       "contactDetailsDesc": "Dados do contato",
       "optedOutBadge": "Optou por não receber transmissões",
+      "name": "Nome",
       "phone": "Telefone",
       "email": "E-mail",
       "company": "Empresa",
@@ -704,7 +725,16 @@
         "failed": "Falharam"
       },
       "toastFailedDelete": "Falha ao excluir: {error}",
-      "toastDeleted": "Transmissão excluída"
+      "toastDeleted": "Transmissão excluída",
+      "resumeTitle": "Alguns destinatários precisam de uma nova tentativa",
+      "resumeStalledTitle": "Esta campanha parou no meio do caminho",
+      "resumeHint": "{count} destinatários falharam. Tentar novamente os envia de novo pelo servidor.",
+      "resumeStalledHint": "{count} destinatários nunca foram enviados — a aba do navegador que executava esta campanha foi fechada antes de terminar. Retomar a conclui pelo servidor.",
+      "resumePending": "Retomar envio ({count})",
+      "retryFailed": "Repetir falhas ({count})",
+      "toastResumeStarted": "Enviando {count} destinatários em segundo plano.",
+      "toastResumeStartedCapped": "Enviando {count} destinatários em segundo plano. Mais {remaining} vão precisar de outra execução.",
+      "toastResumeFailed": "Não foi possível retomar: {error}"
     },
     "new": {
       "title": "Nova transmissão",
@@ -1030,6 +1060,8 @@
         "placeholderBody": "{\"id\": \"{{ contact.id }}\"}",
         "matchType": "Tipo de correspondência",
         "matchContains": "Contém",
+        "matchWord": "Palavra inteira",
+        "matchWordHint": "Corresponde à palavra-chave apenas como uma palavra isolada, então \"k\" não dispara mais em \"thanks\". Ideal para palavras-chave curtas em idiomas separados por espaços; use Contém para idiomas escritos sem espaços.",
         "matchExact": "Exata",
         "closeConversationHint": "Define o status da conversa como \"encerrada\". Nenhuma configuração necessária."
       },
@@ -1553,6 +1585,12 @@
       "webhookTitle": "Configuração do webhook",
       "webhookDesc": "Use esta URL como retorno de chamada (callback) do webhook no painel do app da Meta.",
       "webhookUrl": "URL de retorno do webhook",
+      "mediaTitle": "Armazenamento de anexos",
+      "mediaDesc": "A Meta exclui a mídia recebida cerca de 30 dias após a chegada. Os anexos podem ser copiados para o seu próprio armazenamento para continuarem visíveis.",
+      "mirrorInbound": "Manter anexos recebidos",
+      "mirrorInboundDesc": "Salva uma cópia de cada foto, vídeo, áudio e documento enviado pelos clientes. Usa o seu armazenamento do Supabase; arquivos acima de 16 MB são ignorados.",
+      "mirrorInboundOffWarning": "Novos anexos deixarão de ser copiados e ficarão indisponíveis cerca de 30 dias após a chegada.",
+      "mirrorInboundSaveFailed": "Não foi possível atualizar a configuração de anexos.",
       "saving": "Salvando...",
       "saveConfig": "Salvar configuração",
       "testing": "Testando...",

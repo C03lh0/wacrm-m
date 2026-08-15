@@ -51,7 +51,8 @@ next-env.d.ts
 /CLAUDE.md
 
 # docs
-/docs/
+/docs/*
+!/docs/docker.md
 
 # scripts
 /scripts/

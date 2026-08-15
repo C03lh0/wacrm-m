@@ -50,21 +50,23 @@ function makeDb(optedOutContactIds: Set<string>): SupabaseClient {
           .map((id) => ({ id }));
         return resolve({ data: rows, error: null });
       }
-      if (table === 'broadcast_recipients') {
-        const payload = b.__insertPayload as
-          | { contact_id: string }[]
-          | undefined;
-        const rows = (payload ?? []).map((p, i) => ({
-          id: `recipient-${i}`,
-          contact_id: p.contact_id,
-        }));
-        return resolve({ data: rows, error: null });
-      }
       return resolve({ data: null, error: null });
     };
     return b;
   }
-  return { from: (t: string) => builder(t) } as unknown as SupabaseClient;
+  return {
+    from: (t: string) => builder(t),
+    // create_broadcast_with_recipients (migration 037) — the atomic
+    // parent + recipients insert.
+    rpc: (_name: string, args: { p_contact_ids: string[] }) => {
+      const rows = args.p_contact_ids.map((contactId, i) => ({
+        broadcast_id: 'broadcast-1',
+        recipient_id: `recipient-${i}`,
+        contact_id: contactId,
+      }));
+      return Promise.resolve({ data: rows, error: null });
+    },
+  } as unknown as SupabaseClient;
 }
 
 describe('createBroadcast — opt-out filtering (migration 039)', () => {
