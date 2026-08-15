@@ -231,7 +231,10 @@ function sendPathDb(
           if (table === 'conversations') captured.conversation = row;
           return builder;
         },
-        maybeSingle: async () => ({ data: null, error: null }),
+        maybeSingle: async () => {
+          if (table === 'whatsapp_config') return { data: config, error: null };
+          return { data: null, error: null };
+        },
         single: async () => {
           if (table === 'conversations') {
             return { data: conversation, error: null };

@@ -14,10 +14,10 @@ import type { ContentType } from "@/types";
  *      "does it look like a filename" guard.
  *   2. The basename of a `chat-media` bucket URL, minus the leading id/epoch
  *      prefix that `buildMediaPath` (`@/lib/storage/upload-media`) puts in
- *      front of it. Covers outbound uploads and, since migration 039,
+ *      front of it. Covers outbound uploads and, since migration 042,
  *      inbound media mirrored into the same bucket.
  *   3. A synthesised `whatsapp-<kind>-<timestamp>.<ext>`. The extension comes
- *      from `media_type` when the row has one (migration 039 — the webhook
+ *      from `media_type` when the row has one (migration 042 — the webhook
  *      used to discard Meta's MIME type), falling back to whatever the
  *      browser reported for the fetched bytes.
  */
@@ -132,7 +132,7 @@ export interface MediaFilenameInput {
   content_type: ContentType;
   content_text?: string;
   media_url?: string;
-  /** Meta's MIME type for inbound media (migration 039); null on older rows. */
+  /** Meta's MIME type for inbound media (migration 042); null on older rows. */
   media_type?: string | null;
   created_at: string;
 }

@@ -7,9 +7,17 @@
 //   createBroadcast()  — validate, resolve contacts, insert the
 //                        `broadcasts` row + `broadcast_recipients`
 //                        rows (status 'pending'), return a plan.
-//   deliverBroadcast() — send each recipient's template via Meta
-//                        (phone-variant retry), stamp each recipient
-//                        row + the aggregate counts, finalize status.
+//   deliverBroadcast() — send each recipient's template via the
+//                        account's resolved provider (phone-variant
+//                        retry), stamp each recipient row + the
+//                        aggregate counts, finalize status.
+//
+// Broadcasts are 100% template-based (`broadcasts.template_name` is
+// NOT NULL), and templates are a Meta-only concept — Evolution has no
+// template-approval workflow. createBroadcast() resolves the
+// account's provider via provider-factory.ts and fails fast with
+// `unsupported_message_type_for_provider` before writing any rows if
+// the resolved provider has no `sendTemplate`.
 //
 // Recipient rows carry `whatsapp_message_id`, so the inbound webhook's
 // status handler (which matches on that column) updates delivered/read
@@ -18,17 +26,24 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
-import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
+import { SendMessageError } from '@/lib/whatsapp/send-message-error';
+import type { WhatsAppProviderClient, ProviderName } from '@/lib/whatsapp/provider';
 import {
   sanitizePhoneForMeta,
   isValidE164,
   phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
+import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
-import type { MessageTemplate } from '@/types';
+import type { MessageTemplate, Contact } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
+import {
+  resolveVariables,
+  fetchCustomValueIndex,
+  type VariableMapping,
+} from '@/lib/whatsapp/template-variables';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -66,12 +81,15 @@ export interface BroadcastPlan {
   broadcastId: string;
   templateName: string;
   templateLanguage: string;
-  phoneNumberId: string;
-  accessToken: string;
+  client: WhatsAppProviderClient;
+  provider: ProviderName;
+  connectionId: string;
   templateRow: MessageTemplate | null;
   planned: PlannedRecipient[];
   /** Phones rejected up front (invalid E.164) — counted as failed. */
   rejected: number;
+  /** Contacts excluded because they opted out of broadcasts (migration 039). */
+  optedOut: number;
 }
 
 const MAX_RECIPIENTS = 1000;
@@ -108,21 +126,32 @@ export async function createBroadcast(
     );
   }
 
-  // Config (fail fast + provides the audit trail owner already resolved
-  // by the caller). Meta send needs phone_number_id + decrypted token.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
+  // Resolve the account's provider (Meta or Evolution) — see
+  // provider-factory.ts. Broadcasts are 100% template-based, and
+  // templates are a Meta-only concept, so fail fast here (before any
+  // broadcasts/broadcast_recipients rows are written) if the resolved
+  // provider has no sendTemplate.
+  let client: WhatsAppProviderClient;
+  let provider: ProviderName;
+  let connectionId: string;
+  try {
+    const resolved = await resolveProviderForAccount(db, accountId);
+    client = resolved.client;
+    provider = resolved.kind;
+    connectionId = resolved.connectionId;
+  } catch (err) {
+    if (err instanceof SendMessageError) {
+      throw new BroadcastError(err.code, err.message, err.status);
+    }
+    throw err;
+  }
+  if (!client.sendTemplate) {
     throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
+      'unsupported_message_type_for_provider',
+      `Template broadcasts are not supported on ${client.name}-connected accounts.`,
       400
     );
   }
-  const accessToken = decrypt(config.access_token);
 
   // Template row (once) for header/button components; guard a
   // malformed local row rather than N identical opaque failures.
@@ -163,13 +192,40 @@ export async function createBroadcast(
     });
   }
 
+  // Exclude contacts who've opted out of broadcasts (migration 039).
+  // Neither Meta's template-approval process nor Evolution's lack
+  // thereof enforces consent — this is the CRM's own backstop, and
+  // it's checked here regardless of which provider the send will use.
+  let optedOut = 0;
+  let consented = resolved;
+  if (resolved.length > 0) {
+    const { data: optedOutRows } = await db
+      .from('contacts')
+      .select('id')
+      .in(
+        'id',
+        resolved.map((r) => r.contactId)
+      )
+      .not('opted_out_at', 'is', null);
+    const optedOutIds = new Set((optedOutRows ?? []).map((row) => row.id as string));
+    if (optedOutIds.size > 0) {
+      consented = resolved.filter((r) => {
+        if (optedOutIds.has(r.contactId)) {
+          optedOut++;
+          return false;
+        }
+        return true;
+      });
+    }
+  }
+
   // Collapse recipients that resolved to the SAME contact (the caller
   // listed a phone twice, or two numbers fuzzy-matched to one contact).
   // Keep the first occurrence so the contact is messaged once and its
   // params aren't silently overwritten by a later duplicate — and so
   // the row↔params pairing below (keyed by contact_id) is unambiguous.
   const seenContact = new Set<string>();
-  const deduped = resolved.filter((r) => {
+  const deduped = consented.filter((r) => {
     if (seenContact.has(r.contactId)) return false;
     seenContact.add(r.contactId);
     return true;
@@ -178,7 +234,9 @@ export async function createBroadcast(
   if (deduped.length === 0) {
     throw new BroadcastError(
       'bad_request',
-      'No recipients had a valid E.164 phone number',
+      optedOut > 0 && rejected === 0
+        ? 'All recipients have opted out of broadcasts'
+        : 'No recipients had a valid E.164 phone number',
       400
     );
   }
@@ -234,19 +292,23 @@ export async function createBroadcast(
     broadcastId,
     templateName,
     templateLanguage: resolvedTemplate.language,
-    phoneNumberId: config.phone_number_id,
-    accessToken,
+    client,
+    provider,
+    connectionId,
     templateRow,
     planned,
     rejected,
+    optedOut,
   };
 }
 
 /**
- * Fan out a {@link BroadcastPlan}: send each recipient's template
+ * Fan out to every planned recipient: send each recipient's template
  * (phone-variant retry) and stamp its `broadcast_recipients` row.
  * Best-effort per recipient — one failure never aborts the rest.
- * Designed to run inside `after()`.
+ * Shared by {@link deliverBroadcast} (immediate send, called inside
+ * `after()`) and {@link deliverScheduledBroadcast} (cron-driven
+ * deferred send) — same fan-out, different callers.
  *
  * The per-status count columns on `broadcasts` are owned by the DB
  * aggregate trigger (migrations 003/005): each recipient-row update
@@ -255,27 +317,32 @@ export async function createBroadcast(
  * here — only the terminal `status` — otherwise a manual value would
  * race and clobber the trigger-maintained counts.
  */
-export async function deliverBroadcast(
+async function sendPlannedRecipients(
   db: SupabaseClient,
-  plan: BroadcastPlan
+  broadcastId: string,
+  client: WhatsAppProviderClient,
+  templateName: string,
+  templateLanguage: string,
+  templateRow: MessageTemplate | null,
+  planned: PlannedRecipient[]
 ): Promise<void> {
-  for (const recipient of plan.planned) {
+  for (const recipient of planned) {
     const variants = phoneVariants(recipient.phone);
     let sentMessageId: string | null = null;
     let lastError: string | null = null;
 
     for (const variant of variants) {
       try {
-        const result = await sendTemplateMessage({
-          phoneNumberId: plan.phoneNumberId,
-          accessToken: plan.accessToken,
+        // Callers verify client.sendTemplate exists before reaching
+        // this loop (createBroadcast / deliverScheduledBroadcast).
+        const result = await client.sendTemplate!({
           to: variant,
-          templateName: plan.templateName,
-          language: plan.templateLanguage,
-          template: plan.templateRow ?? undefined,
+          templateName,
+          language: templateLanguage,
+          template: templateRow ?? undefined,
           params: recipient.params,
         });
-        sentMessageId = result.messageId;
+        sentMessageId = result.providerMessageId;
         lastError = null;
         break;
       } catch (error) {
@@ -307,7 +374,7 @@ export async function deliverBroadcast(
     }
   }
 
-  await finalizeBroadcastStatus(db, plan.broadcastId);
+  await finalizeBroadcastStatus(db, broadcastId);
 }
 
 /**
@@ -352,5 +419,148 @@ export async function finalizeBroadcastStatus(
       status: failed > 0 && failed === (total ?? 0) ? 'failed' : 'sent',
       updated_at: new Date().toISOString(),
     })
+    .eq('id', broadcastId);
+}
+
+/**
+ * Fan out a {@link BroadcastPlan} built moments ago by
+ * {@link createBroadcast}. Designed to run inside `after()`.
+ */
+export async function deliverBroadcast(
+  db: SupabaseClient,
+  plan: BroadcastPlan
+): Promise<void> {
+  await sendPlannedRecipients(
+    db,
+    plan.broadcastId,
+    plan.client,
+    plan.templateName,
+    plan.templateLanguage,
+    plan.templateRow,
+    plan.planned
+  );
+}
+
+/**
+ * Deliver a broadcast that was persisted earlier as `status:
+ * 'scheduled'` (the dashboard wizard's "schedule for later" option —
+ * see use-broadcast-sending.ts) and whose `scheduled_at` has come
+ * due. Called by the cron route (src/app/api/broadcasts/cron) after
+ * it claims the row.
+ *
+ * Unlike {@link createBroadcast}, no in-memory plan survives from
+ * creation time — the broadcast row and its already-inserted
+ * `broadcast_recipients` (status 'pending') are the only state. Each
+ * recipient's template variables are re-resolved here from the
+ * broadcast's stored `template_variables` mapping against the
+ * contact's CURRENT data, exactly mirroring the immediate-send path's
+ * resolveVariables() call (template-variables.ts) — by design, a
+ * variable resolves to whatever the contact record says at delivery
+ * time, not at scheduling time.
+ */
+export async function deliverScheduledBroadcast(
+  db: SupabaseClient,
+  broadcastId: string
+): Promise<void> {
+  const { data: broadcast } = await db
+    .from('broadcasts')
+    .select('id, account_id, template_name, template_language, template_variables')
+    .eq('id', broadcastId)
+    .maybeSingle();
+  if (!broadcast) return;
+
+  const accountId = broadcast.account_id as string;
+
+  let client: WhatsAppProviderClient;
+  try {
+    const resolved = await resolveProviderForAccount(db, accountId);
+    client = resolved.client;
+  } catch (err) {
+    const message = err instanceof SendMessageError ? err.message : 'WhatsApp provider unavailable';
+    await markScheduledBroadcastFailed(db, broadcastId, message);
+    return;
+  }
+  if (!client.sendTemplate) {
+    // The account switched to Evolution sometime between scheduling
+    // and now — templates are Meta-only. Fail clearly rather than
+    // silently dropping the send.
+    await markScheduledBroadcastFailed(
+      db,
+      broadcastId,
+      `Template broadcasts are not supported on ${client.name}-connected accounts.`
+    );
+    return;
+  }
+
+  const templateName = broadcast.template_name as string;
+  const templateLanguage = broadcast.template_language as string;
+
+  const { data: rawTemplateRow } = await db
+    .from('message_templates')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('name', templateName)
+    .eq('language', templateLanguage)
+    .maybeSingle();
+  const templateRow =
+    rawTemplateRow && isMessageTemplate(rawTemplateRow) ? (rawTemplateRow as MessageTemplate) : null;
+
+  const { data: recipients } = await db
+    .from('broadcast_recipients')
+    .select('id, contact:contacts(id, name, phone, email, company)')
+    .eq('broadcast_id', broadcastId)
+    .eq('status', 'pending');
+
+  if (!recipients || recipients.length === 0) {
+    await db
+      .from('broadcasts')
+      .update({ status: 'sent', updated_at: new Date().toISOString() })
+      .eq('id', broadcastId);
+    return;
+  }
+
+  type RecipientRow = {
+    id: string;
+    contact: { id: string; name?: string; phone: string; email?: string; company?: string } | null;
+  };
+  const rows = recipients as unknown as RecipientRow[];
+
+  const contactIds = rows.map((r) => r.contact?.id).filter((id): id is string => !!id);
+  const customValueIndex = await fetchCustomValueIndex(db, contactIds);
+  const variables = (broadcast.template_variables as Record<string, VariableMapping>) ?? {};
+
+  const planned: PlannedRecipient[] = [];
+  for (const r of rows) {
+    if (!r.contact?.phone) continue;
+    const sanitized = sanitizePhoneForMeta(r.contact.phone);
+    if (!isValidE164(sanitized)) continue;
+    planned.push({
+      recipientRowId: r.id,
+      phone: sanitized,
+      params: resolveVariables(variables, r.contact as Contact, customValueIndex.get(r.contact.id)),
+    });
+  }
+
+  if (planned.length === 0) {
+    await markScheduledBroadcastFailed(db, broadcastId, 'No recipients had a valid E.164 phone number');
+    return;
+  }
+
+  await sendPlannedRecipients(db, broadcastId, client, templateName, templateLanguage, templateRow, planned);
+}
+
+async function markScheduledBroadcastFailed(
+  db: SupabaseClient,
+  broadcastId: string,
+  reason: string
+): Promise<void> {
+  await db
+    .from('broadcast_recipients')
+    .update({ status: 'failed', error_message: reason })
+    .eq('broadcast_id', broadcastId)
+    .eq('status', 'pending');
+  await db
+    .from('broadcasts')
+    .update({ status: 'failed', updated_at: new Date().toISOString() })
     .eq('id', broadcastId);
 }

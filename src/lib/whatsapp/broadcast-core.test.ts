@@ -10,6 +10,8 @@ import {
 // them so these tests focus on the persistence boundary.
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: () => 'plain-access-token',
+  encrypt: (v: string) => v,
+  isLegacyFormat: () => false,
 }));
 vi.mock('@/lib/api/v1/contacts', () => ({
   findOrCreateContact: vi.fn(async () => ({ id: 'c1' })),
@@ -60,13 +62,22 @@ function makeDb(rpcResult: { data: unknown; error: unknown }) {
   };
   const database = {
     from(table: string) {
+      if (table === 'whatsapp_connections') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        };
+      }
       if (table === 'whatsapp_config') {
         return {
           select: () => ({
             eq: () => ({
-              single: () =>
+              maybeSingle: () =>
                 Promise.resolve({
-                  data: { phone_number_id: 'pn-1', access_token: 'enc' },
+                  data: { id: 'cfg-1', phone_number_id: 'pn-1', access_token: 'enc' },
                   error: null,
                 }),
             }),
@@ -91,6 +102,15 @@ function makeDb(rpcResult: { data: unknown; error: unknown }) {
             }),
           }),
         };
+      }
+      if (table === 'contacts') {
+        // Opted-out exclusion (migration 039) — nobody opted out here.
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          in: () => chain,
+          not: () => Promise.resolve({ data: [], error: null }),
+        };
+        return chain;
       }
       throw new Error(`unexpected table: ${table}`);
     },

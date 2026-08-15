@@ -5,8 +5,11 @@
 //
 // Given a conversation and message params, this:
 //   1. validates the params for the message type,
-//   2. loads the conversation + contact + WhatsApp config,
-//   3. sends to Meta (with phone-variant retry + contact auto-fix),
+//   2. loads the conversation + contact + resolves the account's
+//      WhatsApp provider (Meta or Evolution — see provider-factory.ts),
+//   3. sends via that provider (with phone-variant retry + contact
+//      auto-fix — the retry is a Meta sandbox quirk; a no-op loop for
+//      Evolution, whose errors never match the retry trigger),
 //   4. persists the message + updates the conversation,
 //   5. pauses any active Flow run for the contact (agent stepped in).
 //
@@ -14,27 +17,18 @@
 // `accountId` and throws `SendMessageError` on failure. The callers
 // own auth, rate-limiting, body parsing, and mapping the error to
 // their respective response shapes (internal `{ error }` vs the v1
-// envelope). Behaviour is identical to the original inline route —
-// this is a straight extraction so the public endpoint can reuse it
-// without duplicating ~250 lines of Meta plumbing.
+// envelope).
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import {
-  sendTextMessage,
-  sendTemplateMessage,
-  sendMediaMessage,
-  sendInteractiveButtons,
-  sendInteractiveList,
-  type MediaKind,
-} from '@/lib/whatsapp/meta-api';
+import type { MediaKind } from '@/lib/whatsapp/meta-api';
 import {
   validateInteractivePayload,
   interactivePayloadPreviewText,
   type InteractiveMessagePayload,
 } from '@/lib/whatsapp/interactive';
-import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   sanitizePhoneForMeta,
@@ -43,6 +37,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
+import { SendMessageError } from '@/lib/whatsapp/send-message-error';
 import {
   resolveTemplateRow,
   templateBodyParams,
@@ -57,21 +52,11 @@ export const VALID_MESSAGE_TYPES = [
   ...MEDIA_KINDS,
 ] as const;
 
-/**
- * Typed failure with a machine `code` and a suggested HTTP `status`.
- * Callers map it to their own response shape (`toErrorResponse` for
- * the dashboard route, the v1 envelope for the public endpoint).
- */
-export class SendMessageError extends Error {
-  readonly code: string;
-  readonly status: number;
-  constructor(code: string, message: string, status: number) {
-    super(message);
-    this.name = 'SendMessageError';
-    this.code = code;
-    this.status = status;
-  }
-}
+// Re-exported so every existing `import { SendMessageError } from
+// '@/lib/whatsapp/send-message'` call site keeps working unchanged.
+// Callers map it to their own response shape (`toErrorResponse` for
+// the dashboard route, the v1 envelope for the public endpoint).
+export { SendMessageError } from '@/lib/whatsapp/send-message-error';
 
 export interface SendMessageParams {
   conversationId: string;
@@ -252,39 +237,14 @@ export async function sendMessageToConversation(
   }
 
   // WhatsApp config, account-scoped.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
+  // Resolves to Meta or Evolution depending on which the account has
+  // configured — see provider-factory.ts. Throws SendMessageError
+  // (whatsapp_not_configured / whatsapp_disconnected) exactly as the
+  // inline whatsapp_config lookup used to for a Meta-only account.
+  const { client, kind: providerKind, connectionId } =
+    await resolveProviderForAccount(db, accountId);
 
-  if (configError || !config) {
-    throw new SendMessageError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
-  }
-
-  const accessToken = decrypt(config.access_token);
-
-  // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
-  if (isLegacyFormat(config.access_token)) {
-    void db
-      .from('whatsapp_config')
-      .update({ access_token: encrypt(accessToken) })
-      .eq('id', config.id)
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) {
-          console.warn(
-            '[send-message] access_token GCM upgrade failed:',
-            error.message
-          );
-        }
-      });
-  }
-
-  // Resolve the reply target to its Meta message_id. The parent must
+  // Resolve the reply target to its provider message id. The parent must
   // belong to this same conversation — otherwise a caller could quote
   // messages they can't see by guessing UUIDs.
   let contextMessageId: string | undefined;
@@ -338,9 +298,14 @@ export async function sendMessageToConversation(
 
   const attempt = async (phone: string): Promise<string> => {
     if (messageType === 'template') {
-      const result = await sendTemplateMessage({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      if (!client.sendTemplate) {
+        throw new SendMessageError(
+          'unsupported_message_type_for_provider',
+          `Template messages are not supported on ${client.name}.`,
+          400
+        );
+      }
+      const result = await client.sendTemplate({
         to: phone,
         templateName: templateName!,
         language: sendLanguage,
@@ -349,12 +314,10 @@ export async function sendMessageToConversation(
         params: templateParams || [],
         contextMessageId,
       });
-      return result.messageId;
+      return result.providerMessageId;
     }
     if (isMediaKind) {
-      const result = await sendMediaMessage({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      const result = await client.sendMedia({
         to: phone,
         kind: messageType as MediaKind,
         link: mediaUrl!,
@@ -362,14 +325,19 @@ export async function sendMessageToConversation(
         filename: filename || undefined,
         contextMessageId,
       });
-      return result.messageId;
+      return result.providerMessageId;
     }
     if (messageType === 'interactive') {
       const p = interactivePayload!;
       if (p.kind === 'buttons') {
-        const result = await sendInteractiveButtons({
-          phoneNumberId: config.phone_number_id,
-          accessToken,
+        if (!client.sendInteractiveButtons) {
+          throw new SendMessageError(
+            'unsupported_message_type_for_provider',
+            `Interactive button messages are not supported on ${client.name}.`,
+            400
+          );
+        }
+        const result = await client.sendInteractiveButtons({
           to: phone,
           bodyText: p.body,
           headerText: p.header || undefined,
@@ -377,11 +345,16 @@ export async function sendMessageToConversation(
           buttons: p.buttons,
           contextMessageId,
         });
-        return result.messageId;
+        return result.providerMessageId;
       }
-      const result = await sendInteractiveList({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      if (!client.sendInteractiveList) {
+        throw new SendMessageError(
+          'unsupported_message_type_for_provider',
+          `Interactive list messages are not supported on ${client.name}.`,
+          400
+        );
+      }
+      const result = await client.sendInteractiveList({
         to: phone,
         bodyText: p.body,
         buttonLabel: p.button_label,
@@ -390,21 +363,22 @@ export async function sendMessageToConversation(
         sections: p.sections,
         contextMessageId,
       });
-      return result.messageId;
+      return result.providerMessageId;
     }
-    const result = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
+    const result = await client.sendText({
       to: phone,
       text: contentText!,
       contextMessageId,
     });
-    return result.messageId;
+    return result.providerMessageId;
   };
 
-  // Send via Meta — retry across phone-number variants if Meta rejects
-  // with "recipient not in allowed list"; persist a working variant
-  // back to the contact so the next send goes straight through.
+  // Send via the resolved provider — retry across phone-number
+  // variants if the provider rejects with "recipient not in allowed
+  // list" (a Meta sandbox quirk; Evolution errors never match this
+  // pattern, so an Evolution send below is effectively single-shot).
+  // Persist a working variant back to the contact so the next send
+  // goes straight through.
   let waMessageId = '';
   let workingPhone = sanitizedPhone;
   try {
@@ -431,9 +405,17 @@ export async function sendMessageToConversation(
 
     if (lastError) throw lastError;
   } catch (err) {
+    // Provider adapters (evolution-provider.ts) already throw a typed,
+    // correctly-coded SendMessageError — propagate those as-is instead
+    // of flattening them into a generic 502. Only a raw Error (Meta's
+    // meta-api.ts throws plain Errors) gets wrapped here, preserving
+    // the exact pre-abstraction behavior for Meta sends.
+    if (err instanceof SendMessageError) {
+      throw err;
+    }
     const message =
-      err instanceof Error ? err.message : 'Unknown Meta API error';
-    console.error('[send-message] Meta send failed for all variants:', message);
+      err instanceof Error ? err.message : `Unknown ${client.name} API error`;
+    console.error(`[send-message] ${client.name} send failed for all variants:`, message);
     throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
   }
 
@@ -480,6 +462,9 @@ export async function sendMessageToConversation(
       interactive_payload:
         messageType === 'interactive' ? interactivePayload : null,
       message_id: waMessageId,
+      provider: providerKind,
+      connection_id: connectionId,
+      provider_message_id: waMessageId,
       status: 'sent',
       reply_to_message_id: replyToMessageId || null,
     })

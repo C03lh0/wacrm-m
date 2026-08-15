@@ -8,6 +8,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import { getWhatsAppConnectionStatus } from '@/lib/whatsapp/connection-status'
 
 export async function GET() {
   const supabase = await createClient()
@@ -90,10 +91,12 @@ export async function POST(request: Request) {
   // (is_active=false) are allowed to be incomplete so users can save
   // progress mid-build.
   if (is_active) {
+    const { provider } = await getWhatsAppConnectionStatus(supabase, accountId)
     const issues = [
       ...validateTriggerForActivation(effectiveTriggerType, effectiveTriggerConfig ?? {}),
       ...validateStepsForActivation(
         (effectiveSteps ?? []) as unknown as { step_type: string; step_config: Record<string, unknown> }[],
+        provider,
       ),
     ]
     if (issues.length > 0) {

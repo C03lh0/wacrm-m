@@ -207,6 +207,61 @@ describe("validateStepsForActivation", () => {
   });
 });
 
+describe("validateStepsForActivation — provider gating (Evolution)", () => {
+  it("passes a send_template step when no provider is given (Meta or unknown)", () => {
+    const issues = validateStepsForActivation([
+      { step_type: "send_template", step_config: { template_name: "promo" } },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("passes the same step for an explicit 'meta' provider", () => {
+    const issues = validateStepsForActivation(
+      [{ step_type: "send_template", step_config: { template_name: "promo" } }],
+      "meta",
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("flags send_template as unsupported on an Evolution-connected account", () => {
+    const issues = validateStepsForActivation(
+      [{ step_type: "send_template", step_config: { template_name: "promo" } }],
+      "evolution",
+    );
+    expect(issues.map((i) => i.path)).toContain("steps[0].template_name");
+    expect(issues.map((i) => i.message)).toContain(
+      "Template messages are not supported on Evolution-connected accounts.",
+    );
+  });
+
+  it("flags send_buttons / send_list as unsupported on Evolution, alongside any Meta-limit issues", () => {
+    const issues = validateStepsForActivation(
+      [
+        {
+          step_type: "send_buttons",
+          step_config: {
+            kind: "buttons",
+            body: "Pick one",
+            buttons: [{ id: "yes", title: "Yes" }],
+          },
+        },
+      ],
+      "evolution",
+    );
+    expect(issues.map((i) => i.message)).toContain(
+      "Interactive button/list messages are not supported on Evolution-connected accounts.",
+    );
+  });
+
+  it("does not flag provider-agnostic step types on Evolution", () => {
+    const issues = validateStepsForActivation(
+      [{ step_type: "add_tag", step_config: { tag_id: "tag-uuid" } }],
+      "evolution",
+    );
+    expect(issues).toEqual([]);
+  });
+});
+
 describe("validateTriggerForActivation", () => {
   it("accepts a valid keyword_match config", () => {
     expect(

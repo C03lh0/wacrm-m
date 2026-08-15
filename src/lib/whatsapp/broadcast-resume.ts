@@ -19,7 +19,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { BroadcastError, type BroadcastPlan } from '@/lib/whatsapp/broadcast-core';
-import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
+import { SendMessageError } from '@/lib/whatsapp/send-message-error';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 
@@ -205,15 +206,24 @@ export async function planBroadcastResume(
     );
   }
 
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
+  let client: BroadcastPlan['client'];
+  let provider: BroadcastPlan['provider'];
+  let connectionId: BroadcastPlan['connectionId'];
+  try {
+    const resolved = await resolveProviderForAccount(db, accountId);
+    client = resolved.client;
+    provider = resolved.kind;
+    connectionId = resolved.connectionId;
+  } catch (err) {
+    if (err instanceof SendMessageError) {
+      throw new BroadcastError(err.code, err.message, err.status);
+    }
+    throw err;
+  }
+  if (!client.sendTemplate) {
     throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
+      'unsupported_message_type_for_provider',
+      `Template broadcasts are not supported on ${client.name}-connected accounts.`,
       400
     );
   }
@@ -236,8 +246,9 @@ export async function planBroadcastResume(
     broadcastId,
     templateName: broadcast.template_name,
     templateLanguage: resolvedTemplate.language,
-    phoneNumberId: config.phone_number_id,
-    accessToken: decrypt(config.access_token),
+    client,
+    provider,
+    connectionId,
     templateRow: resolvedTemplate.row,
     planned: slice.map((row) => ({
       recipientRowId: row.id,
@@ -247,6 +258,7 @@ export async function planBroadcastResume(
         : [],
     })),
     rejected: 0,
+    optedOut: 0,
   };
 
   return { plan, remaining, unsendable: unsendable.length };

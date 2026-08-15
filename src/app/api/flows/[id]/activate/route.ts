@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { getWhatsAppConnectionStatus } from '@/lib/whatsapp/connection-status'
 
 /**
  * POST /api/flows/[id]/activate
@@ -70,7 +71,7 @@ export async function POST(
     const [{ data: flow }, { data: nodes }] = await Promise.all([
       admin
         .from('flows')
-        .select('name, trigger_type, trigger_config, entry_node_id')
+        .select('account_id, name, trigger_type, trigger_config, entry_node_id')
         .eq('id', id)
         .maybeSingle(),
       admin
@@ -81,6 +82,7 @@ export async function POST(
     if (!flow) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
+    const { provider } = await getWhatsAppConnectionStatus(admin, flow.account_id as string)
     const issues = validateFlowForActivation(
       flow as {
         name: string
@@ -93,6 +95,7 @@ export async function POST(
         node_type: string
         config: Record<string, unknown>
       }>,
+      provider,
     )
     const blockers = issues.filter((i) => i.severity === 'error')
     if (blockers.length > 0) {

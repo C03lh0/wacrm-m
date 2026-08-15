@@ -398,9 +398,14 @@ export function ContactDetailView({
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <SheetTitle className="text-popover-foreground truncate">
-                    {contact.name || t('unnamed')}
-                  </SheetTitle>
+                  <div className="flex items-center gap-2">
+                    <SheetTitle className="text-popover-foreground truncate">
+                      {contact.name || t('unnamed')}
+                    </SheetTitle>
+                    {contact.opted_out_at && (
+                      <Badge variant="destructive">{t('optedOutBadge')}</Badge>
+                    )}
+                  </div>
                   <SheetDescription className="text-muted-foreground text-xs mt-0.5">
                     {t('contactDetailsDesc')}
                   </SheetDescription>

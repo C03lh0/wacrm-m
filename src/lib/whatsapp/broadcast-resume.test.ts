@@ -11,6 +11,8 @@ import {
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => `decrypted:${v}`,
+  encrypt: (v: string) => `encrypted:${v}`,
+  isLegacyFormat: () => false,
 }));
 
 // ============================================================
@@ -116,6 +118,7 @@ interface PlanFixture {
   broadcast?: Record<string, unknown> | null;
   recipients?: Record<string, unknown>[];
   config?: Record<string, unknown> | null;
+  evolutionConnection?: Record<string, unknown> | null;
   templates?: Record<string, unknown>[];
 }
 
@@ -141,14 +144,18 @@ function planDb(fx: PlanFixture, writes: PlanWrites = {}): SupabaseClient {
           writes.failedUpdate = row;
           return b;
         },
-        maybeSingle: async () => ({
-          data: fx.broadcast === undefined ? null : fx.broadcast,
-          error: null,
-        }),
-        single: async () => ({
-          data: fx.config === undefined ? null : fx.config,
-          error: null,
-        }),
+        maybeSingle: async () => {
+          if (table === 'broadcasts') {
+            return { data: fx.broadcast === undefined ? null : fx.broadcast, error: null };
+          }
+          if (table === 'whatsapp_connections') {
+            return { data: fx.evolutionConnection ?? null, error: null };
+          }
+          if (table === 'whatsapp_config') {
+            return { data: fx.config === undefined ? null : fx.config, error: null };
+          }
+          return { data: null, error: null };
+        },
         then: (resolve: (r: { data: unknown[]; error: null }) => unknown) => {
           if (table === 'broadcast_recipients') {
             return resolve({ data: fx.recipients ?? [], error: null });
@@ -170,7 +177,7 @@ const BROADCAST = {
   template_language: 'en_US',
 };
 
-const CONFIG = { phone_number_id: 'pn-1', access_token: 'tok' };
+const CONFIG = { id: 'cfg-1', phone_number_id: 'pn-1', access_token: 'tok' };
 
 function recipient(
   id: string,
@@ -220,7 +227,9 @@ describe('planBroadcastResume', () => {
         params: ['B456', 'Monday'],
       },
     ]);
-    expect(plan.accessToken).toBe('decrypted:tok');
+    expect(plan.provider).toBe('meta');
+    expect(plan.connectionId).toBe('cfg-1');
+    expect(plan.client.name).toBe('meta');
     expect(remaining).toBe(0);
     expect(unsendable).toBe(0);
   });

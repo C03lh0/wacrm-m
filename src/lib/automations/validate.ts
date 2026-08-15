@@ -1,5 +1,6 @@
 import type { AutomationTriggerType } from '@/types'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import type { ProviderName } from '@/lib/whatsapp/provider'
 
 // ------------------------------------------------------------
 // Pre-flight config validation for automations about to be activated.
@@ -27,7 +28,10 @@ interface StepLike {
   branches?: { yes?: StepLike[]; no?: StepLike[] }
 }
 
-export function validateStepsForActivation(steps: StepLike[]): ValidationIssue[] {
+export function validateStepsForActivation(
+  steps: StepLike[],
+  provider?: ProviderName | null,
+): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   if (!Array.isArray(steps) || steps.length === 0) {
     issues.push({
@@ -36,22 +40,32 @@ export function validateStepsForActivation(steps: StepLike[]): ValidationIssue[]
     })
     return issues
   }
-  walk(steps, '', issues)
+  walk(steps, '', issues, provider ?? null)
   return issues
 }
 
-function walk(steps: StepLike[], prefix: string, issues: ValidationIssue[]): void {
+function walk(
+  steps: StepLike[],
+  prefix: string,
+  issues: ValidationIssue[],
+  provider: ProviderName | null,
+): void {
   steps.forEach((s, i) => {
     const path = `${prefix}steps[${i}]`
-    validateOne(s, path, issues)
+    validateOne(s, path, issues, provider)
     if (s.step_type === 'condition' && s.branches) {
-      if (s.branches.yes) walk(s.branches.yes, `${path}.yes.`, issues)
-      if (s.branches.no) walk(s.branches.no, `${path}.no.`, issues)
+      if (s.branches.yes) walk(s.branches.yes, `${path}.yes.`, issues, provider)
+      if (s.branches.no) walk(s.branches.no, `${path}.no.`, issues, provider)
     }
   })
 }
 
-function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): void {
+function validateOne(
+  step: StepLike,
+  path: string,
+  issues: ValidationIssue[],
+  provider: ProviderName | null,
+): void {
   const c = step.step_config ?? {}
   switch (step.step_type) {
     case 'send_message':
@@ -67,11 +81,26 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       if (!result.ok) {
         issues.push({ path: `${path}.interactive`, message: result.error })
       }
+      // Evolution/Baileys has no native interactive button/list
+      // message type — see provider.ts.
+      if (provider === 'evolution') {
+        issues.push({
+          path: `${path}.interactive`,
+          message: 'Interactive button/list messages are not supported on Evolution-connected accounts.',
+        })
+      }
       break
     }
     case 'send_template':
       if (!nonEmpty(c.template_name)) {
         issues.push({ path: `${path}.template_name`, message: 'template name is required' })
+      }
+      // Evolution has no template-approval workflow — see provider.ts.
+      if (provider === 'evolution') {
+        issues.push({
+          path: `${path}.template_name`,
+          message: 'Template messages are not supported on Evolution-connected accounts.',
+        })
       }
       break
     case 'add_tag':

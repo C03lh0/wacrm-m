@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
-import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory'
+import { SendMessageError } from '@/lib/whatsapp/send-message-error'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
 import {
@@ -120,23 +120,28 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    let client
+    try {
+      const resolved = await resolveProviderForAccount(supabase, accountId)
+      client = resolved.client
+    } catch (err) {
+      if (err instanceof SendMessageError) {
+        return NextResponse.json({ error: err.message }, { status: err.status })
+      }
+      throw err
+    }
 
-    if (configError || !config) {
+    // Broadcasts are 100% template-based, and templates are a Meta-only
+    // concept — Evolution has no template-approval workflow. Reject
+    // here, before touching the template table or sending anything.
+    if (!client.sendTemplate) {
       return NextResponse.json(
         {
-          error:
-            'WhatsApp not configured. Please set up your WhatsApp integration first.',
+          error: `Template broadcasts are not supported on ${client.name}-connected accounts.`,
         },
         { status: 400 }
       )
     }
-
-    const accessToken = decrypt(config.access_token)
 
     // Load the template row once so sendTemplateMessage can build
     // header + button components on each iteration. Loading inside
@@ -185,9 +190,8 @@ export async function POST(request: Request) {
 
       for (const variant of variants) {
         try {
-          const result = await sendTemplateMessage({
-            phoneNumberId: config.phone_number_id,
-            accessToken,
+          // Presence already verified above, before the loop started.
+          const result = await client.sendTemplate!({
             to: variant,
             templateName: template_name,
             language: resolvedTemplate.language,
@@ -195,7 +199,7 @@ export async function POST(request: Request) {
             messageParams: recipient.messageParams,
             params: recipient.params ?? [],
           })
-          sentMessageId = result.messageId
+          sentMessageId = result.providerMessageId
           lastError = null
           break
         } catch (error) {

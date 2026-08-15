@@ -45,6 +45,8 @@ export default function NewBroadcastPage() {
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
+  /** datetime-local value ("" = send now). */
+  const [scheduledAt, setScheduledAt] = useState('');
 
   async function handleSend() {
     if (!template) return;
@@ -62,6 +64,10 @@ export default function NewBroadcastPage() {
         },
         variables,
         headerMediaUrl,
+        // datetime-local carries no timezone — new Date(...) parses it
+        // in the browser's local zone, which is exactly what the user
+        // picked; toISOString() converts that to a UTC instant for storage.
+        scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -221,6 +227,8 @@ export default function NewBroadcastPage() {
               onNameChange={setName}
               template={template}
               audience={audience}
+              scheduledAt={scheduledAt}
+              onScheduledAtChange={setScheduledAt}
               onSend={handleSend}
               onSaveDraft={handleSaveDraft}
               onBack={() => setCurrentStep(2)}

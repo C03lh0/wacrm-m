@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -55,6 +56,7 @@ export function ContactForm({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');
+  const [optedOut, setOptedOut] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Duplicate-phone detection for NEW contacts. `exact` (same digits)
@@ -76,6 +78,7 @@ export function ContactForm({
       setPhone(contact?.phone ?? '');
       setEmail(contact?.email ?? '');
       setCompany(contact?.company ?? '');
+      setOptedOut(!!contact?.opted_out_at);
       setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
       setDupMatch(null);
       fetchTags();
@@ -149,6 +152,10 @@ export function ContactForm({
 
       let contactId = contact?.id;
 
+      const optedOutAt = optedOut
+        ? (contact?.opted_out_at ?? new Date().toISOString())
+        : null;
+
       if (isEdit && contactId) {
         const { error } = await supabase
           .from('contacts')
@@ -157,6 +164,7 @@ export function ContactForm({
             phone: phone.trim(),
             email: email.trim() || null,
             company: company.trim() || null,
+            opted_out_at: optedOutAt,
             updated_at: new Date().toISOString(),
           })
           .eq('id', contactId);
@@ -171,6 +179,7 @@ export function ContactForm({
             phone: phone.trim(),
             email: email.trim() || null,
             company: company.trim() || null,
+            opted_out_at: optedOutAt,
           })
           .select('id')
           .single();
@@ -320,6 +329,20 @@ export function ContactForm({
               onChange={(e) => setCompany(e.target.value)}
               placeholder={t('companyPlaceholder')}
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/40 px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="cf-opted-out" className="text-foreground">
+                {t('optedOutLabel')}
+              </Label>
+              <p className="text-xs text-muted-foreground">{t('optedOutHint')}</p>
+            </div>
+            <Switch
+              id="cf-opted-out"
+              checked={optedOut}
+              onCheckedChange={(v) => setOptedOut(!!v)}
             />
           </div>
 

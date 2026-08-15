@@ -11,6 +11,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import { getWhatsAppConnectionStatus } from '@/lib/whatsapp/connection-status'
 
 async function requireUser() {
   const supabase = await createClient()
@@ -70,7 +71,7 @@ export async function PATCH(
   // to compute the post-patch "effective" state for validation.
   const { data: existing } = await admin
     .from('automations')
-    .select('id, user_id, is_active, trigger_type, trigger_config')
+    .select('id, user_id, account_id, is_active, trigger_type, trigger_config')
     .eq('id', id)
     .maybeSingle()
   if (!existing || existing.user_id !== user.id) {
@@ -100,9 +101,10 @@ export async function PATCH(
     const mergedSteps = Array.isArray(body.steps)
       ? (body.steps as { step_type: string; step_config: Record<string, unknown> }[])
       : await loadStepsTree(id)
+    const { provider } = await getWhatsAppConnectionStatus(admin, existing.account_id as string)
     const issues = [
       ...validateTriggerForActivation(mergedTriggerType, mergedTriggerConfig),
-      ...validateStepsForActivation(mergedSteps),
+      ...validateStepsForActivation(mergedSteps, provider),
     ]
     if (issues.length > 0) {
       return NextResponse.json(

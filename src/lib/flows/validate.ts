@@ -24,6 +24,7 @@
  */
 
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
+import type { ProviderName } from "@/lib/whatsapp/provider";
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -51,6 +52,7 @@ interface NodeInput {
 export function validateFlowForActivation(
   flow: FlowInput,
   nodes: NodeInput[],
+  provider?: ProviderName | null,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -112,7 +114,7 @@ export function validateFlowForActivation(
 
   // Per-node rules (Meta limits + dead-end + edge resolution).
   for (const n of nodes) {
-    issues.push(...validateNode(n, keys));
+    issues.push(...validateNode(n, keys, provider ?? null));
   }
 
   // Reachability — every non-orphan node must be reachable from the
@@ -185,6 +187,7 @@ function validateTrigger(
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
+  provider: ProviderName | null,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -302,6 +305,16 @@ function validateNode(
     }
 
     case "send_buttons": {
+      // Evolution/Baileys has no native interactive button message
+      // type — see provider.ts.
+      if (provider === "evolution") {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          message: "Send-buttons nodes aren't supported on Evolution-connected accounts.",
+        });
+      }
       const cfg = node.config as {
         text?: string;
         buttons?: Array<{
@@ -400,6 +413,16 @@ function validateNode(
     }
 
     case "send_list": {
+      // Evolution/Baileys has no native interactive list message
+      // type — see provider.ts.
+      if (provider === "evolution") {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          message: "Send-list nodes aren't supported on Evolution-connected accounts.",
+        });
+      }
       const cfg = node.config as {
         text?: string;
         button_label?: string;

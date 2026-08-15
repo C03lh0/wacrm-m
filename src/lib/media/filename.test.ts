@@ -234,7 +234,7 @@ describe("mediaFilename", () => {
   });
 
   it("recovers the sender's filename from a mirrored inbound object path", () => {
-    // Migration 039 prefixes the object with Meta's media id; the same
+    // Migration 042 prefixes the object with Meta's media id; the same
     // leading-digits rule that hides the outbound epoch stamp hides it.
     expect(
       mediaFilename(
