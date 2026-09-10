@@ -145,6 +145,19 @@ html[data-mode="light"] {
   --sidebar-border: oklch(0.922 0.004 260);
 }
 
+/* ---- MODE: icon swap ----
+ *
+ * ModeToggle renders both of its icons and lets CSS pick one, so the
+ * right icon is painted from the boot script's `data-mode` — before
+ * React hydrates and before the provider adopts that mode. Picking in
+ * React instead would either flash the wrong icon or break hydration,
+ * since the server always renders the default mode. */
+
+html[data-mode="dark"] [data-mode-icon="light"],
+html[data-mode="light"] [data-mode-icon="dark"] {
+  display: none;
+}
+
 /* ---- ACCENT: primary color ---- */
 
 :root,

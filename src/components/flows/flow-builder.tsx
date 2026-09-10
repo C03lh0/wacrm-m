@@ -52,12 +52,14 @@ import {
   NODE_META,
   NodeIconChip,
   groupNodeTypesByCategory,
+  isNodeTypeSupported,
   nodeColors,
   slugify,
   summarizeNode,
   type BuilderNode,
   type NodeType,
 } from './shared';
+import { useWhatsAppConnectionStatus } from '@/hooks/use-whatsapp-connection-status';
 import { NodeConfigForm } from './forms/node-config-form';
 import { NodeKeySelect } from './forms/fields';
 import { IssueLine } from './validation-panel';
@@ -580,6 +582,7 @@ function NodeConfigWithAdvanced({
 // ============================================================
 
 function AddNodeButton({ onAdd, t }: { onAdd: (type: NodeType) => void; t: ReturnType<typeof useTranslations> }) {
+  const { status: connectionStatus } = useWhatsAppConnectionStatus();
   const types: NodeType[] = [
     'start',
     'send_buttons',
@@ -615,11 +618,29 @@ function AddNodeButton({ onAdd, t }: { onAdd: (type: NodeType) => void; t: Retur
               </DropdownMenuLabel>
               {group.types.map((t_type) => {
                 const meta = NODE_META[t_type];
-                return (
-                  <DropdownMenuItem key={t_type} onClick={() => onAdd(t_type)}>
+                const supported = isNodeTypeSupported(t_type, connectionStatus.provider);
+                const item = (
+                  <DropdownMenuItem
+                    key={t_type}
+                    disabled={!supported}
+                    onClick={() => supported && onAdd(t_type)}
+                  >
                     <meta.icon className={cn('h-3.5 w-3.5', meta.color)} />
                     {t(`nodes.${t_type}.label`)}
                   </DropdownMenuItem>
+                );
+                // See flow-canvas.tsx's CanvasAddNodeButton for why a
+                // disabled item needs a non-disabled title-bearing
+                // ancestor to show a tooltip in Safari/older Firefox.
+                return supported ? (
+                  item
+                ) : (
+                  <span
+                    key={t_type}
+                    title={t('nodeUnsupported', { provider: connectionStatus.provider ?? 'evolution' })}
+                  >
+                    {item}
+                  </span>
                 );
               })}
             </DropdownMenuGroup>

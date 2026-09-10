@@ -4,6 +4,7 @@ import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory'
 import { SendMessageError } from '@/lib/whatsapp/send-message-error'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
+import { interpolateBody } from '@/lib/whatsapp/template-variables'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -44,6 +45,12 @@ interface BroadcastResult {
  * sending hook was forced to ship every batch with `templateParams[0]`
  * — meaning every recipient got contact-0's personalization. The new
  * shape is what actually fixes that.
+ *
+ * `send_mode` ("template", the default, or "plain_text") picks between
+ * a Meta-approved template send and a free-text `body_text` send (with
+ * `{{1}}`/`{{2}}` positional substitution done locally, no template-
+ * approval step) — the latter is what makes broadcasting possible on
+ * Evolution-connected accounts, which have no `sendTemplate`.
  */
 interface NewRecipient {
   phone: string
@@ -89,7 +96,12 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      send_mode,
+      body_text,
     } = body
+
+    const sendMode: 'template' | 'plain_text' =
+      send_mode === 'plain_text' ? 'plain_text' : 'template'
 
     // Normalize to a list of {phone, params} regardless of shape.
     let recipients: NewRecipient[]
@@ -113,9 +125,15 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!template_name) {
+    if (sendMode === 'template' && !template_name) {
       return NextResponse.json(
         { error: 'template_name is required' },
+        { status: 400 }
+      )
+    }
+    if (sendMode === 'plain_text' && !body_text) {
+      return NextResponse.json(
+        { error: 'body_text is required' },
         { status: 400 }
       )
     }
@@ -131,13 +149,23 @@ export async function POST(request: Request) {
       throw err
     }
 
-    // Broadcasts are 100% template-based, and templates are a Meta-only
-    // concept — Evolution has no template-approval workflow. Reject
-    // here, before touching the template table or sending anything.
-    if (!client.sendTemplate) {
+    // Templates are a Meta-only concept — Evolution has no
+    // template-approval workflow. sendText (the plain_text path) is
+    // required on every provider, so that branch never actually
+    // rejects here, but the check stays explicit for symmetry. Reject
+    // before touching the template table or sending anything.
+    if (sendMode === 'template' && !client.sendTemplate) {
       return NextResponse.json(
         {
           error: `Template broadcasts are not supported on ${client.name}-connected accounts.`,
+        },
+        { status: 400 }
+      )
+    }
+    if (sendMode === 'plain_text' && !client.sendText) {
+      return NextResponse.json(
+        {
+          error: `Plain-text broadcasts are not supported on ${client.name}-connected accounts.`,
         },
         { status: 400 }
       )
@@ -148,22 +176,28 @@ export async function POST(request: Request) {
     // the loop would N+1 against Supabase for every recipient.
     // Guard against a malformed local row crashing every send in
     // the loop with the same opaque TypeError — fail loudly once.
-    const resolvedTemplate = await resolveTemplateRow(
-      supabase,
-      accountId,
-      template_name,
-      template_language,
-    )
-    if (resolvedTemplate.malformed) {
-      return NextResponse.json(
-        {
-          error:
-            'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before broadcasting.',
-        },
-        { status: 500 },
+    // Skipped for plain_text — there's no template to resolve.
+    let templateRow = null
+    let resolvedTemplateLanguage = template_language
+    if (sendMode === 'template') {
+      const resolvedTemplate = await resolveTemplateRow(
+        supabase,
+        accountId,
+        template_name,
+        template_language,
       )
+      if (resolvedTemplate.malformed) {
+        return NextResponse.json(
+          {
+            error:
+              'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before broadcasting.',
+          },
+          { status: 500 },
+        )
+      }
+      templateRow = resolvedTemplate.row
+      resolvedTemplateLanguage = resolvedTemplate.language
     }
-    const templateRow = resolvedTemplate.row
 
     const results: BroadcastResult[] = []
     let sentCount = 0
@@ -191,14 +225,20 @@ export async function POST(request: Request) {
       for (const variant of variants) {
         try {
           // Presence already verified above, before the loop started.
-          const result = await client.sendTemplate!({
-            to: variant,
-            templateName: template_name,
-            language: resolvedTemplate.language,
-            template: templateRow ?? undefined,
-            messageParams: recipient.messageParams,
-            params: recipient.params ?? [],
-          })
+          const result =
+            sendMode === 'plain_text'
+              ? await client.sendText({
+                  to: variant,
+                  text: interpolateBody(body_text, recipient.params ?? []),
+                })
+              : await client.sendTemplate!({
+                  to: variant,
+                  templateName: template_name,
+                  language: resolvedTemplateLanguage,
+                  template: templateRow ?? undefined,
+                  messageParams: recipient.messageParams,
+                  params: recipient.params ?? [],
+                })
           sentMessageId = result.providerMessageId
           lastError = null
           break

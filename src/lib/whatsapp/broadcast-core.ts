@@ -12,12 +12,17 @@
 //                        retry), stamp each recipient row + the
 //                        aggregate counts, finalize status.
 //
-// Broadcasts are 100% template-based (`broadcasts.template_name` is
-// NOT NULL), and templates are a Meta-only concept — Evolution has no
-// template-approval workflow. createBroadcast() resolves the
-// account's provider via provider-factory.ts and fails fast with
-// `unsupported_message_type_for_provider` before writing any rows if
-// the resolved provider has no `sendTemplate`.
+// Two send modes (`broadcasts.send_mode`, migration 044):
+//   'template'   — Meta-only, requires an approved template
+//                  (`sendTemplate` on the resolved provider).
+//   'plain_text' — no template, just a body + {{1}}/{{2}} positional
+//                  substitution done locally (interpolateBody), sent
+//                  via `sendText` — present on every provider,
+//                  including Evolution, which has no template-approval
+//                  workflow at all.
+// createBroadcast() resolves the account's provider via
+// provider-factory.ts and fails fast, before writing any rows, if the
+// requested mode isn't supported by the resolved provider.
 //
 // Recipient rows carry `whatsapp_message_id`, so the inbound webhook's
 // status handler (which matches on that column) updates delivered/read
@@ -42,6 +47,7 @@ import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import {
   resolveVariables,
   fetchCustomValueIndex,
+  interpolateBody,
   type VariableMapping,
 } from '@/lib/whatsapp/template-variables';
 
@@ -66,8 +72,13 @@ export interface BroadcastRecipientInput {
 
 export interface CreateBroadcastParams {
   name?: string | null;
-  templateName: string;
+  /** Required when sendMode is 'template' (the default). */
+  templateName?: string;
   templateLanguage?: string | null;
+  /** Defaults to 'template' — every existing caller stays unchanged. */
+  sendMode?: 'template' | 'plain_text';
+  /** Required when sendMode is 'plain_text'. */
+  bodyText?: string;
   recipients: BroadcastRecipientInput[];
 }
 
@@ -79,8 +90,10 @@ interface PlannedRecipient {
 
 export interface BroadcastPlan {
   broadcastId: string;
-  templateName: string;
-  templateLanguage: string;
+  sendMode: 'template' | 'plain_text';
+  templateName: string | null;
+  templateLanguage: string | null;
+  bodyText: string | null;
   client: WhatsAppProviderClient;
   provider: ProviderName;
   connectionId: string;
@@ -107,9 +120,14 @@ export async function createBroadcast(
   params: CreateBroadcastParams
 ): Promise<BroadcastPlan> {
   const { name, templateName, recipients } = params;
+  const sendMode = params.sendMode ?? 'template';
+  const bodyText = params.bodyText?.trim() || null;
 
-  if (!templateName) {
+  if (sendMode === 'template' && !templateName) {
     throw new BroadcastError('bad_request', "'template_name' is required", 400);
+  }
+  if (sendMode === 'plain_text' && !bodyText) {
+    throw new BroadcastError('bad_request', "'body_text' is required", 400);
   }
   if (!Array.isArray(recipients) || recipients.length === 0) {
     throw new BroadcastError(
@@ -127,10 +145,13 @@ export async function createBroadcast(
   }
 
   // Resolve the account's provider (Meta or Evolution) — see
-  // provider-factory.ts. Broadcasts are 100% template-based, and
-  // templates are a Meta-only concept, so fail fast here (before any
+  // provider-factory.ts. Fail fast here (before any
   // broadcasts/broadcast_recipients rows are written) if the resolved
-  // provider has no sendTemplate.
+  // provider doesn't support the requested mode: templates are a
+  // Meta-only concept (sendTemplate is optional); sendText is required
+  // on every provider, so the plain_text branch never actually throws
+  // today, but the check stays explicit for symmetry and in case a
+  // future provider omits even that.
   let client: WhatsAppProviderClient;
   let provider: ProviderName;
   let connectionId: string;
@@ -145,30 +166,43 @@ export async function createBroadcast(
     }
     throw err;
   }
-  if (!client.sendTemplate) {
+  if (sendMode === 'template' && !client.sendTemplate) {
     throw new BroadcastError(
       'unsupported_message_type_for_provider',
       `Template broadcasts are not supported on ${client.name}-connected accounts.`,
       400
     );
   }
+  if (sendMode === 'plain_text' && !client.sendText) {
+    throw new BroadcastError(
+      'unsupported_message_type_for_provider',
+      `Plain-text broadcasts are not supported on ${client.name}-connected accounts.`,
+      400
+    );
+  }
 
   // Template row (once) for header/button components; guard a
   // malformed local row rather than N identical opaque failures.
-  const resolvedTemplate = await resolveTemplateRow(
-    db,
-    accountId,
-    templateName,
-    params.templateLanguage
-  );
-  if (resolvedTemplate.malformed) {
-    throw new BroadcastError(
-      'template_malformed',
-      'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before broadcasting.',
-      500
+  // Skipped entirely for plain_text — there's no template to resolve.
+  let templateRow: MessageTemplate | null = null;
+  let resolvedTemplateLanguage: string | null = null;
+  if (sendMode === 'template') {
+    const resolvedTemplate = await resolveTemplateRow(
+      db,
+      accountId,
+      templateName!,
+      params.templateLanguage
     );
+    if (resolvedTemplate.malformed) {
+      throw new BroadcastError(
+        'template_malformed',
+        'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before broadcasting.',
+        500
+      );
+    }
+    templateRow = resolvedTemplate.row;
+    resolvedTemplateLanguage = resolvedTemplate.language;
   }
-  const templateRow = resolvedTemplate.row;
 
   // Resolve each recipient to a contact. Invalid phones are dropped
   // (counted as rejected) rather than aborting the whole broadcast.
@@ -261,14 +295,16 @@ export async function createBroadcast(
     {
       p_account_id: accountId,
       p_user_id: auditUserId,
-      p_name: name || `API broadcast (${templateName})`,
-      p_template_name: templateName,
-      p_template_language: resolvedTemplate.language,
+      p_name: name || `API broadcast (${sendMode === 'template' ? templateName : 'plain text'})`,
+      p_template_name: sendMode === 'template' ? templateName : null,
+      p_template_language: sendMode === 'template' ? resolvedTemplateLanguage : null,
       p_total_recipients: deduped.length,
       p_contact_ids: deduped.map((r) => r.contactId),
       // Frozen per-recipient params (migration 038) — without them a
       // resume of this broadcast has no way to reconstruct {{1}}.
       p_template_params: deduped.map((r) => r.params),
+      p_send_mode: sendMode,
+      p_body_text: sendMode === 'plain_text' ? bodyText : null,
     }
   );
   if (createErr || !createdRows || createdRows.length === 0) {
@@ -290,8 +326,10 @@ export async function createBroadcast(
 
   return {
     broadcastId,
-    templateName,
-    templateLanguage: resolvedTemplate.language,
+    sendMode,
+    templateName: sendMode === 'template' ? templateName! : null,
+    templateLanguage: sendMode === 'template' ? resolvedTemplateLanguage : null,
+    bodyText: sendMode === 'plain_text' ? bodyText : null,
     client,
     provider,
     connectionId,
@@ -321,9 +359,11 @@ async function sendPlannedRecipients(
   db: SupabaseClient,
   broadcastId: string,
   client: WhatsAppProviderClient,
-  templateName: string,
-  templateLanguage: string,
+  sendMode: 'template' | 'plain_text',
+  templateName: string | null,
+  templateLanguage: string | null,
   templateRow: MessageTemplate | null,
+  bodyText: string | null,
   planned: PlannedRecipient[]
 ): Promise<void> {
   for (const recipient of planned) {
@@ -333,15 +373,21 @@ async function sendPlannedRecipients(
 
     for (const variant of variants) {
       try {
-        // Callers verify client.sendTemplate exists before reaching
-        // this loop (createBroadcast / deliverScheduledBroadcast).
-        const result = await client.sendTemplate!({
-          to: variant,
-          templateName,
-          language: templateLanguage,
-          template: templateRow ?? undefined,
-          params: recipient.params,
-        });
+        // Callers verify the required capability exists before
+        // reaching this loop (createBroadcast / deliverScheduledBroadcast).
+        const result =
+          sendMode === 'plain_text'
+            ? await client.sendText({
+                to: variant,
+                text: interpolateBody(bodyText!, recipient.params),
+              })
+            : await client.sendTemplate!({
+                to: variant,
+                templateName: templateName!,
+                language: templateLanguage!,
+                template: templateRow ?? undefined,
+                params: recipient.params,
+              });
         sentMessageId = result.providerMessageId;
         lastError = null;
         break;
@@ -434,9 +480,11 @@ export async function deliverBroadcast(
     db,
     plan.broadcastId,
     plan.client,
+    plan.sendMode,
     plan.templateName,
     plan.templateLanguage,
     plan.templateRow,
+    plan.bodyText,
     plan.planned
   );
 }
@@ -464,12 +512,16 @@ export async function deliverScheduledBroadcast(
 ): Promise<void> {
   const { data: broadcast } = await db
     .from('broadcasts')
-    .select('id, account_id, template_name, template_language, template_variables')
+    .select(
+      'id, account_id, send_mode, template_name, template_language, template_variables, body_text'
+    )
     .eq('id', broadcastId)
     .maybeSingle();
   if (!broadcast) return;
 
   const accountId = broadcast.account_id as string;
+  const sendMode = (broadcast.send_mode as 'template' | 'plain_text') ?? 'template';
+  const bodyText = broadcast.body_text as string | null;
 
   let client: WhatsAppProviderClient;
   try {
@@ -480,7 +532,7 @@ export async function deliverScheduledBroadcast(
     await markScheduledBroadcastFailed(db, broadcastId, message);
     return;
   }
-  if (!client.sendTemplate) {
+  if (sendMode === 'template' && !client.sendTemplate) {
     // The account switched to Evolution sometime between scheduling
     // and now — templates are Meta-only. Fail clearly rather than
     // silently dropping the send.
@@ -491,19 +543,30 @@ export async function deliverScheduledBroadcast(
     );
     return;
   }
+  if (sendMode === 'plain_text' && !client.sendText) {
+    await markScheduledBroadcastFailed(
+      db,
+      broadcastId,
+      `Plain-text broadcasts are not supported on ${client.name}-connected accounts.`
+    );
+    return;
+  }
 
-  const templateName = broadcast.template_name as string;
-  const templateLanguage = broadcast.template_language as string;
+  const templateName = broadcast.template_name as string | null;
+  const templateLanguage = broadcast.template_language as string | null;
 
-  const { data: rawTemplateRow } = await db
-    .from('message_templates')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('name', templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
-  const templateRow =
-    rawTemplateRow && isMessageTemplate(rawTemplateRow) ? (rawTemplateRow as MessageTemplate) : null;
+  let templateRow: MessageTemplate | null = null;
+  if (sendMode === 'template' && templateName && templateLanguage) {
+    const { data: rawTemplateRow } = await db
+      .from('message_templates')
+      .select('*')
+      .eq('account_id', accountId)
+      .eq('name', templateName)
+      .eq('language', templateLanguage)
+      .maybeSingle();
+    templateRow =
+      rawTemplateRow && isMessageTemplate(rawTemplateRow) ? (rawTemplateRow as MessageTemplate) : null;
+  }
 
   const { data: recipients } = await db
     .from('broadcast_recipients')
@@ -546,7 +609,17 @@ export async function deliverScheduledBroadcast(
     return;
   }
 
-  await sendPlannedRecipients(db, broadcastId, client, templateName, templateLanguage, templateRow, planned);
+  await sendPlannedRecipients(
+    db,
+    broadcastId,
+    client,
+    sendMode,
+    templateName,
+    templateLanguage,
+    templateRow,
+    bodyText,
+    planned
+  );
 }
 
 async function markScheduledBroadcastFailed(

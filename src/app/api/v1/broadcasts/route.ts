@@ -1,21 +1,28 @@
 // ============================================================
-// POST /api/v1/broadcasts — launch a template broadcast
+// POST /api/v1/broadcasts — launch a broadcast
 // (scope: broadcasts:send).
 //
 // Body:
 //   {
 //     "name": "July promo",                 // optional label
-//     "template_name": "promo_july",        // required, approved template
+//     "send_mode": "template",              // optional, "template" (default) or "plain_text"
+//     "template_name": "promo_july",        // required when send_mode is "template"
 //     "template_language": "en_US",         // optional (default en_US)
+//     "body_text": "Hi {{1}}, we're open!", // required when send_mode is "plain_text"
 //     "recipients": [                        // required, 1..1000
 //       { "to": "+14155550123", "params": ["Jane"] },
 //       { "to": "+14155550124" }
 //     ]
 //   }
 //
+// `plain_text` has no template-approval step — it sends via
+// WhatsAppProviderClient.sendText, so it works on any provider
+// (including Evolution, which has no `sendTemplate`), but `template`
+// still requires a Meta-approved template and only works on Meta.
+//
 // The broadcast + its recipient rows are persisted synchronously, then
-// the Meta fan-out runs in `after()` so the request returns fast. Poll
-// `GET /api/v1/broadcasts/{id}` for progress.
+// the provider fan-out runs in `after()` so the request returns fast.
+// Poll `GET /api/v1/broadcasts/{id}` for progress.
 //
 // Response (202):
 //   { "data": { "broadcast_id", "status": "sending",
@@ -56,7 +63,9 @@ export async function POST(request: Request) {
     }
 
     const templateName =
-      typeof body.template_name === 'string' ? body.template_name : '';
+      typeof body.template_name === 'string' ? body.template_name : undefined;
+    const sendMode = body.send_mode === 'plain_text' ? 'plain_text' : 'template';
+    const bodyText = typeof body.body_text === 'string' ? body.body_text : undefined;
     const recipients = Array.isArray(body.recipients) ? body.recipients : [];
 
     const auditUserId = await resolveAuditUserId(ctx.supabase, ctx.accountId);
@@ -68,6 +77,8 @@ export async function POST(request: Request) {
         typeof body.template_language === 'string'
           ? body.template_language
           : null,
+      sendMode,
+      bodyText,
       recipients: recipients.map((r) => ({
         to: typeof r?.to === 'string' ? r.to : '',
         params: Array.isArray(r?.params) ? r.params : undefined,

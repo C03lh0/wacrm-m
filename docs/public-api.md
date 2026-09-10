@@ -221,10 +221,20 @@ first (`404` otherwise).
 
 ### `POST /api/v1/broadcasts`
 
-Launch a template broadcast to a list of recipients. Scope:
-`broadcasts:send`. The broadcast + its recipient rows are persisted
-immediately and the sends fan out in the background, so the call
-returns fast — poll `GET /api/v1/broadcasts/{id}` for progress.
+Launch a broadcast to a list of recipients. Scope: `broadcasts:send`.
+The broadcast + its recipient rows are persisted immediately and the
+sends fan out in the background, so the call returns fast — poll
+`GET /api/v1/broadcasts/{id}` for progress.
+
+Two send modes, set via `send_mode` (defaults to `template`):
+
+- **`template`** — a Meta-approved template. Only works on
+  Meta-connected accounts.
+- **`plain_text`** — a free-text `body_text` with `{{1}}`/`{{2}}`-style
+  positional placeholders (resolved the same way template params are,
+  via each recipient's `params`), sent with no template-approval step.
+  Works on any provider, including Evolution-connected accounts, which
+  have no template workflow at all.
 
 ```bash
 curl -X POST https://your-crm.example.com/api/v1/broadcasts \
@@ -237,6 +247,20 @@ curl -X POST https://your-crm.example.com/api/v1/broadcasts \
         "recipients": [
           { "to": "+14155550123", "params": ["Jane"] },
           { "to": "+14155550124" }
+        ]
+      }'
+```
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/broadcasts \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "July promo (Evolution)",
+        "send_mode": "plain_text",
+        "body_text": "Hi {{1}}, we are open today!",
+        "recipients": [
+          { "to": "+14155550123", "params": ["Jane"] }
         ]
       }'
 ```

@@ -34,7 +34,12 @@ export interface AudienceConfig {
 
 interface BroadcastPayload {
   name: string;
-  template: MessageTemplate;
+  /** 'template' (default) or 'plain_text' — see broadcast-core.ts. */
+  sendMode?: 'template' | 'plain_text';
+  /** Required when sendMode is 'template' (or omitted). */
+  template?: MessageTemplate | null;
+  /** Required when sendMode is 'plain_text'. */
+  bodyText?: string;
   audience: AudienceConfig;
   variables: Record<string, VariableMapping>;
   /**
@@ -42,6 +47,8 @@ interface BroadcastPayload {
    * time for media-header templates — Meta rejects the send without
    * it. Passed through as `messageParams.headerMediaUrl`; the builder
    * falls back to the template's stored URL only when this is empty.
+   * Meaningless for a plain_text broadcast (Evolution has no template
+   * headers).
    */
   headerMediaUrl?: string;
   /**
@@ -312,6 +319,15 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
 
       // ── Step 2: Create broadcast row ──────────────────────────────
+      const sendMode = payload.sendMode ?? 'template';
+      const bodyText = payload.bodyText?.trim() || null;
+      if (sendMode === 'template' && !payload.template) {
+        throw new Error('A template is required for a template broadcast.');
+      }
+      if (sendMode === 'plain_text' && !bodyText) {
+        throw new Error('A message body is required for a plain-text broadcast.');
+      }
+
       setProgress(10);
       const { data: broadcast, error: broadcastError } = await supabase
         .from('broadcasts')
@@ -319,8 +335,11 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           user_id: user.id,
           account_id: accountId,
           name: payload.name,
-          template_name: payload.template.name,
-          template_language: payload.template.language ?? 'en_US',
+          send_mode: sendMode,
+          template_name: sendMode === 'template' ? payload.template!.name : null,
+          template_language:
+            sendMode === 'template' ? (payload.template!.language ?? 'en_US') : null,
+          body_text: sendMode === 'plain_text' ? bodyText : null,
           template_variables: payload.variables,
           audience_filter: {
             type: payload.audience.type,
@@ -428,8 +447,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       // Media-header templates (image/video/document) require a media
       // URL on every send. Collected in the personalize step and applied
       // to all recipients; falls back to the template's stored URL on the
-      // server when omitted.
-      const headerType = payload.template.header_type;
+      // server when omitted. Meaningless for plain_text (no headers).
+      const headerType = sendMode === 'template' ? payload.template!.header_type : null;
       const isMediaHeader =
         headerType === 'image' ||
         headerType === 'video' ||
@@ -462,11 +481,19 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             const res = await fetch('/api/whatsapp/broadcast', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipients: apiRecipients,
-                template_name: payload.template.name,
-                template_language: payload.template.language ?? 'en_US',
-              }),
+              body: JSON.stringify(
+                sendMode === 'plain_text'
+                  ? {
+                      recipients: apiRecipients,
+                      send_mode: 'plain_text',
+                      body_text: bodyText,
+                    }
+                  : {
+                      recipients: apiRecipients,
+                      template_name: payload.template!.name,
+                      template_language: payload.template!.language ?? 'en_US',
+                    },
+              ),
             });
 
             data = await res.json();

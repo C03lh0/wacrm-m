@@ -23,7 +23,10 @@ interface VariableMapping {
 }
 
 interface Step3Props {
-  template: MessageTemplate;
+  /** Meta mode: the selected template. Null in plain_text mode. */
+  template: MessageTemplate | null;
+  /** Evolution mode: the free-text body composed in step 1. Ignored when `template` is set. */
+  bodyText?: string;
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
   /** Media URL for an IMAGE/VIDEO/DOCUMENT header, when the template has one. */
@@ -69,6 +72,7 @@ const SAMPLE_CONTACT: Contact = {
 
 export function Step3Personalize({
   template,
+  bodyText,
   variables,
   onUpdate,
   headerMediaUrl,
@@ -77,6 +81,9 @@ export function Step3Personalize({
   onBack,
 }: Step3Props) {
   const t = useTranslations('Broadcasts.wizard');
+  // Plain_text mode has no template — the body composed in step 1 is
+  // the source of placeholders/preview instead of template.body_text.
+  const sourceBodyText = template ? template.body_text : (bodyText ?? '');
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [loadingFields, setLoadingFields] = useState(true);
   const [firstContact, setFirstContact] = useState<Contact | null>(null);
@@ -129,29 +136,28 @@ export function Step3Personalize({
   }, []);
 
   const placeholders = useMemo(() => {
-    const matches = template.body_text.match(/\{\{(\d+)\}\}/g);
+    const matches = sourceBodyText.match(/\{\{(\d+)\}\}/g);
     if (!matches) return [];
     return [...new Set(matches)].sort();
-  }, [template.body_text]);
+  }, [sourceBodyText]);
 
   // Templates with an IMAGE/VIDEO/DOCUMENT header need a media URL at
   // send time — Meta requires the media component on every delivery and
   // rejects the broadcast without it. The field is hidden for text-only
-  // headers.
-  const mediaHeaderType = isMediaHeaderType(template.header_type)
-    ? template.header_type
-    : null;
+  // headers, and doesn't apply at all in plain_text mode (no headers).
+  const mediaHeaderType =
+    template && isMediaHeaderType(template.header_type) ? template.header_type : null;
 
   // Seed the field with the template's stored sample URL the first time
   // we land on a media-header template, so the common "reuse the
   // approved media" case needs no typing. Only seeds when empty to avoid
   // clobbering a URL the user already edited.
   useEffect(() => {
-    if (mediaHeaderType && !headerMediaUrl && template.header_media_url) {
+    if (mediaHeaderType && !headerMediaUrl && template?.header_media_url) {
       onHeaderMediaUrlChange(template.header_media_url);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaHeaderType, template.header_media_url]);
+  }, [mediaHeaderType, template?.header_media_url]);
 
   const headerMediaError = useMemo<'missing' | 'invalid' | null>(() => {
     if (!mediaHeaderType) return null;
@@ -197,7 +203,7 @@ export function Step3Personalize({
       ? firstContactCustomValues
       : new Map<string, string>();
 
-    let text = template.body_text;
+    let text = sourceBodyText;
     for (const placeholder of placeholders) {
       const key = placeholder.replace(/^\{\{|\}\}$/g, '');
       const mapping = variables[key];
@@ -222,7 +228,7 @@ export function Step3Personalize({
     }
     return text;
   }, [
-    template.body_text,
+    sourceBodyText,
     variables,
     placeholders,
     firstContact,

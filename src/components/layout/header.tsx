@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { Check, Globe, LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -17,8 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
-import { useLocaleSwitch } from "@/hooks/use-locale-switch";
-import { SUPPORTED_LOCALES } from "@/lib/i18n/locales";
+import { LocaleToggle } from "@/components/layout/locale-toggle";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -51,7 +50,6 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const t = useTranslations("Header");
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
-  const { currentLocale, switchLocale } = useLocaleSwitch();
   const titleKey = getPageTitleKey(pathname);
 
   const initial =
@@ -78,6 +76,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
 
       <div className="flex items-center gap-1 sm:gap-2">
         <ModeToggle />
+        <LocaleToggle />
 
         <DropdownMenu>
         <DropdownMenuTrigger
@@ -135,21 +134,6 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             <SettingsIcon className="size-4" />
             {t("menuSettings")}
           </DropdownMenuItem>
-          <DropdownMenuSeparator className="bg-border" />
-          {SUPPORTED_LOCALES.map((option) => (
-            <DropdownMenuItem
-              key={option.code}
-              onClick={() => switchLocale(option.code)}
-              aria-label={t("switchLanguage", { name: option.label })}
-              className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
-            >
-              <Globe className="size-4" />
-              {option.label}
-              {option.code === currentLocale && (
-                <Check className="ml-auto size-4" />
-              )}
-            </DropdownMenuItem>
-          ))}
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             onClick={signOut}

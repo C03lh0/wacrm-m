@@ -23,6 +23,7 @@ import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
 import { SendMessageError } from '@/lib/whatsapp/send-message-error';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
+import type { MessageTemplate } from '@/types';
 
 /** Which recipients a resume pass picks up. */
 export type ResumeScope = 'pending' | 'failed' | 'all';
@@ -147,7 +148,7 @@ export async function planBroadcastResume(
 ): Promise<ResumePlan> {
   const { data: broadcast, error: bcError } = await db
     .from('broadcasts')
-    .select('id, template_name, template_language')
+    .select('id, send_mode, template_name, template_language, body_text')
     .eq('id', broadcastId)
     .eq('account_id', accountId)
     .maybeSingle();
@@ -220,36 +221,53 @@ export async function planBroadcastResume(
     }
     throw err;
   }
-  if (!client.sendTemplate) {
+  const sendMode = (broadcast.send_mode as 'template' | 'plain_text') ?? 'template';
+
+  if (sendMode === 'template' && !client.sendTemplate) {
     throw new BroadcastError(
       'unsupported_message_type_for_provider',
       `Template broadcasts are not supported on ${client.name}-connected accounts.`,
       400
     );
   }
-
-  const resolvedTemplate = await resolveTemplateRow(
-    db,
-    accountId,
-    broadcast.template_name,
-    broadcast.template_language
-  );
-  if (resolvedTemplate.malformed) {
+  if (sendMode === 'plain_text' && !client.sendText) {
     throw new BroadcastError(
-      'template_malformed',
-      'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before resuming.',
-      500
+      'unsupported_message_type_for_provider',
+      `Plain-text broadcasts are not supported on ${client.name}-connected accounts.`,
+      400
     );
+  }
+
+  let templateRow: MessageTemplate | null = null;
+  let templateLanguage: string | null = null;
+  if (sendMode === 'template') {
+    const resolvedTemplate = await resolveTemplateRow(
+      db,
+      accountId,
+      broadcast.template_name,
+      broadcast.template_language
+    );
+    if (resolvedTemplate.malformed) {
+      throw new BroadcastError(
+        'template_malformed',
+        'Template row is malformed locally — run "Sync from Meta" in Settings to repair it before resuming.',
+        500
+      );
+    }
+    templateRow = resolvedTemplate.row;
+    templateLanguage = resolvedTemplate.language;
   }
 
   const plan: BroadcastPlan = {
     broadcastId,
-    templateName: broadcast.template_name,
-    templateLanguage: resolvedTemplate.language,
+    sendMode,
+    templateName: sendMode === 'template' ? broadcast.template_name : null,
+    templateLanguage: sendMode === 'template' ? templateLanguage : null,
+    bodyText: sendMode === 'plain_text' ? (broadcast.body_text as string | null) : null,
     client,
     provider,
     connectionId,
-    templateRow: resolvedTemplate.row,
+    templateRow,
     planned: slice.map((row) => ({
       recipientRowId: row.id,
       phone: sanitizePhoneForMeta(contactPhone(row) ?? ''),

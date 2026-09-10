@@ -168,6 +168,39 @@ export const NODE_META: Record<
   },
 };
 
+// ============================================================
+// Provider-capability gating — some node types map to Meta-only
+// WhatsApp features (interactive buttons/lists have no Evolution/
+// Baileys equivalent; see WhatsAppProviderClient.sendInteractiveButtons
+// /sendInteractiveList in src/lib/whatsapp/provider.ts, which Evolution
+// simply omits). Gating the palette means the flow can't be built with
+// a step that would only fail at send time.
+//
+// Note this gates on the provider *name* reported by
+// /api/whatsapp/status, whereas the server-side equivalent
+// (meta-send.ts's sendInteractiveViaProvider) gates on the capability
+// being present on the resolved client. The browser can't hold a
+// WhatsAppProviderClient, so the name is the only signal available
+// here; keep the two in sync when a provider gains these methods.
+// ============================================================
+
+export const NODE_PROVIDER_REQUIREMENT: Partial<Record<NodeType, 'meta'>> = {
+  send_buttons: 'meta',
+  send_list: 'meta',
+};
+
+/** True if `type` has no provider requirement, or the account's
+ *  resolved provider satisfies it. `null` (status not yet loaded, or
+ *  no WhatsApp connection at all) is treated as unsupported for gated
+ *  types — fail toward disabling rather than allowing. */
+export function isNodeTypeSupported(
+  type: NodeType,
+  provider: 'meta' | 'evolution' | null
+): boolean {
+  const required = NODE_PROVIDER_REQUIREMENT[type];
+  return !required || provider === required;
+}
+
 /**
  * Bucket an ordered list of node types by category, preserving both
  * the category order (NODE_CATEGORIES) and the within-category order

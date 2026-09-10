@@ -65,6 +65,24 @@ export function resolveVariables(
 }
 
 /**
+ * Substitute {{1}}, {{2}}, ... in a plain-text broadcast body with
+ * positional values from `params` (the same array shape
+ * resolveVariables() produces for templates). Templates leave this
+ * substitution to Meta server-side; plain-text sends have no template
+ * engine on the other end (Evolution's sendText is just raw text), so
+ * the CRM does it here before sending. An index past the end of
+ * `params` resolves to an empty string rather than leaving the
+ * placeholder literal, matching how an unmapped template variable
+ * would ship.
+ */
+export function interpolateBody(bodyText: string, params: string[]): string {
+  return bodyText.replace(/\{\{\s*(\d+)\s*\}\}/g, (_match, num: string) => {
+    const index = Number(num) - 1;
+    return params[index] ?? '';
+  });
+}
+
+/**
  * Bulk-fetch contact_custom_values for a set of contacts. Returns an
  * index keyed by contact_id → field_id → value.
  */

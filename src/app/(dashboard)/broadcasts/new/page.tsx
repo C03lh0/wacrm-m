@@ -7,10 +7,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
 import { MessageTemplate } from '@/types';
 import { Step1ChooseTemplate } from '@/components/broadcasts/step1-choose-template';
+import { Step1PlainTextBody } from '@/components/broadcasts/step1-plain-text-body';
 import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audience';
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/hooks/use-broadcast-sending';
+import { useWhatsAppConnectionStatus } from '@/hooks/use-whatsapp-connection-status';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -26,9 +28,13 @@ export default function NewBroadcastPage() {
   const t = useTranslations('Broadcasts.new');
   const { accountId } = useAuth();
   const { createAndSendBroadcast, isProcessing, progress } = useBroadcastSending();
+  const { status: connectionStatus } = useWhatsAppConnectionStatus();
+  const sendMode: 'template' | 'plain_text' =
+    connectionStatus.provider === 'evolution' ? 'plain_text' : 'template';
 
   const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
+  const [bodyText, setBodyText] = useState('');
   const [audience, setAudience] = useState<{
     type: 'all' | 'tags' | 'custom_field' | 'csv';
     tagIds?: string[];
@@ -49,12 +55,15 @@ export default function NewBroadcastPage() {
   const [scheduledAt, setScheduledAt] = useState('');
 
   async function handleSend() {
-    if (!template) return;
+    if (sendMode === 'template' && !template) return;
+    if (sendMode === 'plain_text' && !bodyText.trim()) return;
 
     try {
       const broadcastId = await createAndSendBroadcast({
         name,
-        template,
+        sendMode,
+        template: sendMode === 'template' ? template : null,
+        bodyText: sendMode === 'plain_text' ? bodyText : undefined,
         audience: {
           type: audience.type,
           tagIds: audience.tagIds,
@@ -89,7 +98,8 @@ export default function NewBroadcastPage() {
    * A full resume-draft UX is a future polish.
    */
   async function handleSaveDraft() {
-    if (!template || !name.trim()) {
+    const hasContent = sendMode === 'template' ? !!template : bodyText.trim().length > 0;
+    if (!hasContent || !name.trim()) {
       toast.error(t('toastGiveName'));
       return;
     }
@@ -111,8 +121,10 @@ export default function NewBroadcastPage() {
       user_id: user.id,
       account_id: accountId,
       name: name.trim(),
-      template_name: template.name,
-      template_language: template.language ?? 'en_US',
+      send_mode: sendMode,
+      template_name: sendMode === 'template' ? template!.name : null,
+      template_language: sendMode === 'template' ? (template!.language ?? 'en_US') : null,
+      body_text: sendMode === 'plain_text' ? bodyText.trim() : null,
       template_variables: variables,
       audience_filter: {
         type: audience.type,
@@ -194,10 +206,18 @@ export default function NewBroadcastPage() {
             pointerEvents: isProcessing ? 'none' : 'auto',
           }}
         >
-          {currentStep === 0 && (
+          {currentStep === 0 && sendMode === 'template' && (
             <Step1ChooseTemplate
               selectedTemplate={template}
               onSelect={setTemplate}
+              onNext={() => setCurrentStep(1)}
+              onBack={() => router.push('/broadcasts')}
+            />
+          )}
+          {currentStep === 0 && sendMode === 'plain_text' && (
+            <Step1PlainTextBody
+              bodyText={bodyText}
+              onBodyTextChange={setBodyText}
               onNext={() => setCurrentStep(1)}
               onBack={() => router.push('/broadcasts')}
             />
@@ -210,9 +230,10 @@ export default function NewBroadcastPage() {
               onBack={() => setCurrentStep(0)}
             />
           )}
-          {currentStep === 2 && template && (
+          {currentStep === 2 && (sendMode === 'plain_text' ? bodyText.trim() : template) && (
             <Step3Personalize
-              template={template}
+              template={sendMode === 'template' ? template : null}
+              bodyText={sendMode === 'plain_text' ? bodyText : undefined}
               variables={variables}
               onUpdate={setVariables}
               headerMediaUrl={headerMediaUrl}
@@ -221,11 +242,11 @@ export default function NewBroadcastPage() {
               onBack={() => setCurrentStep(1)}
             />
           )}
-          {currentStep === 3 && template && (
+          {currentStep === 3 && (sendMode === 'plain_text' ? bodyText.trim() : template) && (
             <Step4ScheduleSend
               name={name}
               onNameChange={setName}
-              template={template}
+              template={sendMode === 'template' ? template : null}
               audience={audience}
               scheduledAt={scheduledAt}
               onScheduledAtChange={setScheduledAt}

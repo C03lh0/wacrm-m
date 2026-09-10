@@ -26,7 +26,8 @@ interface AudienceConfig {
 interface Step4Props {
   name: string;
   onNameChange: (name: string) => void;
-  template: MessageTemplate;
+  /** Meta mode: the selected template. Null in plain_text mode. */
+  template: MessageTemplate | null;
   audience: AudienceConfig;
   /** ISO datetime-local value ("" = send now). */
   scheduledAt: string;
@@ -175,7 +176,9 @@ export function Step4ScheduleSend({
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.template')}</p>
-            <p className="text-foreground">{template.name}</p>
+            <p className="text-foreground">
+              {template ? template.name : t('scheduleSend.plainTextLabel')}
+            </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.audience')}</p>
@@ -194,10 +197,12 @@ export function Step4ScheduleSend({
               )}
             </div>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Language</p>
-            <p className="text-foreground">{template.language ?? 'en_US'}</p>
-          </div>
+          {template && (
+            <div>
+              <p className="text-xs text-muted-foreground">Language</p>
+              <p className="text-foreground">{template.language ?? 'en_US'}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -265,16 +270,22 @@ export function Step4ScheduleSend({
                 {isScheduling ? (
                   t('scheduleSend.confirmScheduleBody', {
                     count: estimatedReach.toLocaleString(),
-                    template: template.name,
+                    template: template ? template.name : t('scheduleSend.plainTextLabel'),
                     time: new Date(scheduledAt).toLocaleString(),
                   })
-                ) : (
+                ) : template ? (
                   <>
                     You are about to send this broadcast to{' '}
                     <span className="font-medium text-popover-foreground">{estimatedReach.toLocaleString()}</span>{' '}
                     contacts using the{' '}
                     <span className="font-medium text-popover-foreground">{template.name}</span> template.
                     This action cannot be undone.
+                  </>
+                ) : (
+                  <>
+                    You are about to send this plain-text broadcast to{' '}
+                    <span className="font-medium text-popover-foreground">{estimatedReach.toLocaleString()}</span>{' '}
+                    contacts. This action cannot be undone.
                   </>
                 )}
               </DialogDescription>
