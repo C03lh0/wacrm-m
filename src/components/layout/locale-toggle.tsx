@@ -7,11 +7,11 @@ import { SUPPORTED_LOCALES } from "@/lib/i18n/locales";
 import { cn } from "@/lib/utils";
 
 /**
- * EN/PT language switcher — both locales are on screen side by side,
- * the active one highlighted, so the current language and the
- * alternative are readable at a glance. (A single flip-button showed
- * only one of the two, leaving you to guess whether the label meant
- * "you are here" or "click for this".)
+ * EN/PT/ES language switcher — every offered locale is on screen side
+ * by side, the active one highlighted, so the current language and the
+ * alternatives are readable at a glance. (A single flip-button showed
+ * only one of them, leaving you to guess whether the label meant "you
+ * are here" or "click for this".)
  *
  * The segment for the active locale is inert: `switchLocale` ignores a
  * switch to the locale already in use.
@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
  * Rendered from SUPPORTED_LOCALES, so the switcher offers exactly the
  * locales that module says are offerable — `ko` is a valid app locale
  * but deliberately not one of them (see locales.ts). Running under it
- * simply leaves neither segment marked active, which is the truth.
+ * simply leaves no segment marked active, which is the truth.
  *
  * Sized to sit next to ModeToggle in the header and the auth pages:
  * same 40px outer height, same hover treatment. Each segment fills
@@ -60,7 +60,7 @@ export function LocaleToggle({ className }: { className?: string }) {
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            {/* "pt-BR" → "PT": the region suffix is noise at this size. */}
+            {/* Two-letter code: "pt" → "PT". */}
             {code.slice(0, 2).toUpperCase()}
           </button>
         );

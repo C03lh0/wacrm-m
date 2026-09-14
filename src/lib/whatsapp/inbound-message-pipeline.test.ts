@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
   findOrCreateContact,
+  identityFromPhone,
   ingestOwnDeviceMessage,
   ingestParsedMessage,
   type ResolvedContactAndConversation,
@@ -364,6 +365,7 @@ describe('findOrCreateContact — empty name (own-device/fromMe messages)', () =
         b.eq = () => b;
         b.select = () => b;
         b.single = () => Promise.resolve({ data: { id: 'contact-new', ...inserts[0] }, error: null });
+        b.maybeSingle = () => Promise.resolve({ data: null, error: null });
         b.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null });
         return b;
       },
@@ -375,7 +377,7 @@ describe('findOrCreateContact — empty name (own-device/fromMe messages)', () =
     findExistingContact.mockResolvedValue({ id: 'contact-1', phone: '5511999999999', name: 'Jane Real Name' });
     const { db, updates } = makeContactsDb();
 
-    const result = await findOrCreateContact(db, 'acct-1', 'user-1', '5511999999999', '');
+    const result = await findOrCreateContact(db, 'acct-1', 'user-1', identityFromPhone('5511999999999', ''));
 
     expect(result).toEqual({ contact: { id: 'contact-1', phone: '5511999999999', name: 'Jane Real Name' }, wasCreated: false });
     expect(updates).toHaveLength(0);
@@ -385,9 +387,246 @@ describe('findOrCreateContact — empty name (own-device/fromMe messages)', () =
     findExistingContact.mockResolvedValue(null);
     const { db, inserts } = makeContactsDb();
 
-    await findOrCreateContact(db, 'acct-1', 'user-1', '5511999999999', '');
+    await findOrCreateContact(db, 'acct-1', 'user-1', identityFromPhone('5511999999999', ''));
 
     expect(inserts).toHaveLength(1);
     expect(inserts[0].name).toBe('5511999999999');
+  });
+});
+
+// ============================================================
+// Business-scoped user IDs (issue #519)
+//
+// Meta stopped sending the phone number for a customer who has adopted
+// a WhatsApp username: `messages[].from` and `contacts[].wa_id` are
+// both absent, and only `from_user_id` / `user_id` identify them. The
+// webhook route turns that into a `WaIdentity`; everything below is
+// what this pipeline does with one.
+//
+// Before the fix the phone resolved to '', which `findExistingContact`
+// refuses to look up, so every such delivery inserted a NEW contact —
+// migration 022's unique index is partial (`WHERE phone_normalized <> ''`)
+// so nothing stopped it. One contact and one conversation per message.
+// ============================================================
+
+const BSUID = 'US.13491208655302741918';
+const PARENT_BSUID = 'US.ENT.11815799212886844830';
+
+const USERNAME_ONLY_IDENTITY = {
+  phone: '',
+  waUserId: BSUID,
+  waParentUserId: PARENT_BSUID,
+  waUsername: 'realsheenanelson',
+  name: 'Sheena Nelson',
+};
+
+describe('findOrCreateContact — business-scoped user IDs (#519)', () => {
+  afterEach(() => {
+    findExistingContact.mockReset();
+  });
+
+  /**
+   * `contacts` mock that tells the three chains apart:
+   *   BSUID lookup:      select('*').eq().eq().maybeSingle()
+   *   identity backfill: update().eq().select().maybeSingle()
+   *   create:            insert().select().single()
+   */
+  function makeDb(contactByWaUserId: Record<string, unknown> | null = null) {
+    const updates: Record<string, unknown>[] = [];
+    const inserts: Record<string, unknown>[] = [];
+    const db = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: contactByWaUserId, error: null }),
+            }),
+          }),
+        }),
+        update: (patch: Record<string, unknown>) => {
+          updates.push(patch);
+          return {
+            eq: () => ({
+              select: () => ({
+                maybeSingle: () => Promise.resolve({ data: null, error: null }),
+              }),
+            }),
+          };
+        },
+        insert: (row: Record<string, unknown>) => {
+          inserts.push(row);
+          return {
+            select: () => ({
+              single: () =>
+                Promise.resolve({ data: { id: 'contact-new', ...row }, error: null }),
+            }),
+          };
+        },
+      }),
+    } as unknown as SupabaseClient;
+    return { db, updates, inserts };
+  }
+
+  it('creates ONE contact keyed on the BSUID when there is no phone', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const { db, inserts } = makeDb(null);
+
+    const result = await findOrCreateContact(db, 'acct-1', 'user-1', USERNAME_ONLY_IDENTITY);
+
+    expect(result?.wasCreated).toBe(true);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toMatchObject({
+      account_id: 'acct-1',
+      phone: '',
+      wa_user_id: BSUID,
+      wa_parent_user_id: PARENT_BSUID,
+      wa_username: 'realsheenanelson',
+      name: 'Sheena Nelson',
+    });
+  });
+
+  it('never looks the sender up by phone when there is no phone', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const { db } = makeDb(null);
+
+    await findOrCreateContact(db, 'acct-1', 'user-1', USERNAME_ONLY_IDENTITY);
+
+    // The old code called this with '' and got null every time, which
+    // is exactly how the duplicate contacts got created.
+    expect(findExistingContact).not.toHaveBeenCalled();
+  });
+
+  it('reuses the existing contact on the SECOND message from the same BSUID', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const { db, updates, inserts } = makeDb({
+      id: 'contact-bsuid',
+      name: 'Sheena Nelson',
+      phone: '',
+      wa_user_id: BSUID,
+      wa_parent_user_id: PARENT_BSUID,
+      wa_username: 'realsheenanelson',
+    });
+
+    const result = await findOrCreateContact(db, 'acct-1', 'user-1', USERNAME_ONLY_IDENTITY);
+
+    expect(result?.wasCreated).toBe(false);
+    expect(inserts).toHaveLength(0);
+    // Nothing about the identity changed, so no pointless UPDATE either.
+    expect(updates).toHaveLength(0);
+  });
+
+  it('backfills the BSUID onto a contact we already knew by phone', async () => {
+    // Transition payload: both keys present. We match on the phone and
+    // stamp the BSUID so the next phone-less message finds this row.
+    findExistingContact.mockResolvedValue({
+      id: 'contact-1',
+      name: 'Pablo',
+      phone: '16505551234',
+    });
+    const { db, updates, inserts } = makeDb(null);
+
+    await findOrCreateContact(db, 'acct-1', 'user-1', {
+      phone: '16505551234',
+      waUserId: BSUID,
+      waParentUserId: null,
+      waUsername: 'pablomorales',
+      name: 'Pablo',
+    });
+
+    expect(inserts).toHaveLength(0);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      wa_user_id: BSUID,
+      wa_username: 'pablomorales',
+    });
+    // The number we already had is left alone.
+    expect(updates[0]).not.toHaveProperty('phone');
+  });
+
+  it('fills in the phone once Meta finally discloses it', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const { db, updates } = makeDb({
+      id: 'contact-bsuid',
+      name: 'Sheena Nelson',
+      phone: '',
+      wa_user_id: BSUID,
+      wa_username: 'realsheenanelson',
+    });
+
+    await findOrCreateContact(db, 'acct-1', 'user-1', {
+      ...USERNAME_ONLY_IDENTITY,
+      phone: '16505551234',
+    });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ phone: '16505551234' });
+  });
+});
+
+describe('findOrCreateContact — name backfill (#519 regression guard)', () => {
+  afterEach(() => {
+    findExistingContact.mockReset();
+  });
+
+  function makeDb() {
+    const updates: Record<string, unknown>[] = [];
+    const db = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        }),
+        update: (patch: Record<string, unknown>) => {
+          updates.push(patch);
+          return {
+            eq: () => ({
+              select: () => ({
+                maybeSingle: () => Promise.resolve({ data: null, error: null }),
+              }),
+            }),
+          };
+        },
+      }),
+    } as unknown as SupabaseClient;
+    return { db, updates };
+  }
+
+  it('never overwrites an edited name with the phone number', async () => {
+    // No profile name. The display fallback would resolve to the phone
+    // number, and writing that back would replace whatever an agent
+    // typed on the contact — on every single inbound message.
+    findExistingContact.mockResolvedValue({
+      id: 'contact-1',
+      name: 'Ada (VIP, calls Mondays)',
+      phone: '15551230000',
+    });
+    const { db, updates } = makeDb();
+
+    await findOrCreateContact(db, 'acct-1', 'user-1', identityFromPhone('15551230000', ''));
+
+    expect(updates).toHaveLength(0);
+  });
+
+  it('does adopt a username when that is all we were given', async () => {
+    findExistingContact.mockResolvedValue({
+      id: 'contact-1',
+      name: '15551230000',
+      phone: '15551230000',
+    });
+    const { db, updates } = makeDb();
+
+    await findOrCreateContact(db, 'acct-1', 'user-1', {
+      phone: '15551230000',
+      waUserId: null,
+      waParentUserId: null,
+      waUsername: 'ada',
+      name: '',
+    });
+
+    expect(updates[0]).toMatchObject({ name: 'ada' });
   });
 });

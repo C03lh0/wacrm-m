@@ -17,6 +17,7 @@ import {
   resolveContactAndConversation,
   ingestParsedMessage,
   ingestOwnDeviceMessage,
+  identityFromPhone,
   type ParsedInboundContent,
 } from './inbound-message-pipeline'
 import { buildMediaPath } from '@/lib/storage/upload-media'
@@ -265,8 +266,7 @@ export async function processEvolutionMessage(
     db,
     connection.account_id,
     configOwnerUserId,
-    senderPhone,
-    senderName
+    identityFromPhone(senderPhone, senderName)
   )
   if (!resolved) return
 
@@ -331,8 +331,7 @@ async function processOwnDeviceMessage(
     db,
     connection.account_id,
     configOwnerUserId,
-    counterpartPhone,
-    counterpartName
+    identityFromPhone(counterpartPhone, counterpartName)
   )
   if (!resolved) return
 

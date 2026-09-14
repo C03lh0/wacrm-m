@@ -7,11 +7,10 @@ import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory'
 import { SendMessageError } from '@/lib/whatsapp/send-message-error'
 import type { ProviderName } from '@/lib/whatsapp/provider'
 import {
-  sanitizePhoneForMeta,
-  isValidE164,
   phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
+import { resolveContactSendTarget } from '@/lib/whatsapp/wa-identity'
 import {
   resolveTemplateRow,
   templateContentText,
@@ -129,18 +128,23 @@ async function sendViaProvider(
   // column.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
-    .select('id, phone')
+    .select('id, phone, wa_user_id')
     .eq('id', input.contactId)
     .eq('account_id', input.accountId)
     .maybeSingle()
-  if (contactErr || !contact?.phone) {
+  if (contactErr || !contact) {
     throw new Error('contact not found for this account')
   }
 
-  const sanitized = sanitizePhoneForMeta(contact.phone)
-  if (!isValidE164(sanitized)) {
-    throw new Error(`contact phone invalid: ${contact.phone}`)
+  // Phone number, or the business-scoped user ID when Meta has never
+  // given us a number for this customer (issue #519).
+  const sendTarget = resolveContactSendTarget(contact)
+  if (!sendTarget) {
+    throw new Error(
+      `contact has no usable WhatsApp address (phone: ${contact.phone || 'none'})`
+    )
   }
+  const sanitized = sendTarget.target
 
   // Resolves to Meta or Evolution depending on which the account has
   // configured — see provider-factory.ts. Throws SendMessageError
@@ -194,7 +198,7 @@ async function sendViaProvider(
   // Same phone-variant retry as /api/whatsapp/send — Meta sandbox and
   // numbers registered with/without a trunk 0 both require this to
   // reliably land a message.
-  const variants = phoneVariants(sanitized)
+  const variants = sendTarget.isPhone ? phoneVariants(sanitized) : [sanitized]
   let workingPhone = sanitized
   let waMessageId = ''
   let lastError: unknown = null
@@ -212,7 +216,7 @@ async function sendViaProvider(
   }
   if (lastError) throw lastError
 
-  if (workingPhone !== sanitized) {
+  if (sendTarget.isPhone && workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
 

@@ -47,7 +47,7 @@ export default function AgentsPage() {
         </h1>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t('subtitle')}
+        {t('description')}
       </p>
 
       {decided && (

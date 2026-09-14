@@ -10,11 +10,18 @@ const { resolveContactAndConversation, ingestParsedMessage, ingestOwnDeviceMessa
   ingestParsedMessage: vi.fn(async () => {}),
   ingestOwnDeviceMessage: vi.fn(async () => {}),
 }));
-vi.mock('./inbound-message-pipeline', () => ({
-  resolveContactAndConversation,
-  ingestParsedMessage,
-  ingestOwnDeviceMessage,
-}));
+vi.mock('./inbound-message-pipeline', async (importOriginal) => {
+  // `identityFromPhone` is a pure phone/name → WaIdentity shim; the
+  // real one is what these assertions are about, so only the DB-backed
+  // pipeline entry points are stubbed.
+  const actual = await importOriginal<typeof import('./inbound-message-pipeline')>();
+  return {
+    identityFromPhone: actual.identityFromPhone,
+    resolveContactAndConversation,
+    ingestParsedMessage,
+    ingestOwnDeviceMessage,
+  };
+});
 
 import { processEvolutionMessage, extractCounterpartPhone, type EvolutionMessagePayload } from './evolution-webhook-handlers';
 
@@ -137,8 +144,13 @@ describe('processEvolutionMessage — lid-addressed contacts', () => {
       fakeDb,
       'acct-1',
       'user-1',
-      '558198505578',
-      'Jane'
+      {
+        phone: '558198505578',
+        waUserId: null,
+        waParentUserId: null,
+        waUsername: null,
+        name: 'Jane',
+      }
     );
   });
 });
@@ -322,8 +334,13 @@ describe('processEvolutionMessage — own-device (fromMe) messages', () => {
       db,
       'acct-1',
       'user-1',
-      '5511999999999',
-      ''
+      {
+        phone: '5511999999999',
+        waUserId: null,
+        waParentUserId: null,
+        waUsername: null,
+        name: '',
+      }
     );
   });
 

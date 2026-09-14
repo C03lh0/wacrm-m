@@ -55,7 +55,7 @@ const WINDOWS = [7, 30, 90] as const;
  * `GET /api/ai/usage` route. Renders nothing for non-admins.
  */
 export function AiUsageCard() {
-  const t = useTranslations('AiUsage');
+  const t = useTranslations('Agents.usage');
   const { accountId, accountRole, profileLoading } = useAuth();
   const canView = accountRole ? canEditSettings(accountRole) : false;
 
@@ -72,13 +72,13 @@ export function AiUsageCard() {
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(json?.error ?? t('toastLoadFailed'));
+        toast.error(json?.error ?? t('loadFailed'));
         setData(null);
         return;
       }
       setData(json as UsageResponse);
     } catch {
-      toast.error(t('toastLoadFailed'));
+      toast.error(t('loadFailed'));
       setData(null);
     } finally {
       setLoading(false);
@@ -96,9 +96,14 @@ export function AiUsageCard() {
 
   if (profileLoading || !canView) return null;
 
+  // The category label doubles as the data key so the chart tooltip
+  // shows the translated series name.
+  const tokensLabel = t('tokens');
   const chartData =
-    data?.daily.map((d) => ({ day: format(parseISO(d.date), 'MMM d'), Tokens: d.tokens })) ??
-    [];
+    data?.daily.map((d) => ({
+      day: format(parseISO(d.date), 'MMM d'),
+      [tokensLabel]: d.tokens,
+    })) ?? [];
   const hasSpend = (data?.totals.total_tokens ?? 0) > 0;
 
   return (
@@ -123,7 +128,7 @@ export function AiUsageCard() {
             <SelectContent>
               {WINDOWS.map((w) => (
                 <SelectItem key={w} value={String(w)}>
-                  {t('windowDays', { days: w })}
+                  {t('window', { days: w })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -136,7 +141,7 @@ export function AiUsageCard() {
         ) : !hasSpend ? (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-sm text-muted-foreground">
             <BarChart3 className="h-8 w-8 opacity-40" />
-            <p>{t('emptyState', { days: data.window_days })}</p>
+            <p>{t('empty', { days: data.window_days })}</p>
             <p className="text-xs">
               {t('emptyHint')}
             </p>
@@ -165,7 +170,7 @@ export function AiUsageCard() {
               <BarChart
                 data={chartData}
                 index="day"
-                categories={['Tokens']}
+                categories={[tokensLabel]}
                 colors={['violet']}
                 valueFormatter={(v) => formatCompactNumber(v)}
                 showLegend={false}
@@ -192,7 +197,7 @@ export function AiUsageCard() {
                         </span>
                       </span>
                       <span className="flex-shrink-0 tabular-nums text-muted-foreground">
-                        {t('modelTokensCalls', {
+                        {t('modelCalls', {
                           tokens: formatCompactNumber(m.tokens),
                           count: m.calls,
                         })}
@@ -205,7 +210,7 @@ export function AiUsageCard() {
 
             {data.truncated && (
               <p className="text-xs text-muted-foreground">
-                {t('truncatedHint')}
+                {t('partialWindow')}
               </p>
             )}
           </>

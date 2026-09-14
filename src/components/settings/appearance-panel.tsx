@@ -43,7 +43,7 @@ export function AppearancePanel() {
 
         <div
           role="radiogroup"
-          aria-label="Color mode"
+          aria-label={t("colorMode")}
           className="grid max-w-md grid-cols-2 gap-3"
         >
           {MODES.map((m) => (
@@ -84,10 +84,13 @@ export function AppearancePanel() {
           {t("language")}
         </h3>
 
+        {/* One column per locale, and wider than the two-up mode grid
+            above: each card carries a language name plus the "active"
+            badge, which has nowhere to go at a third of max-w-md. */}
         <div
           role="radiogroup"
           aria-label={t("language")}
-          className="grid max-w-md grid-cols-2 gap-3"
+          className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3"
         >
           {SUPPORTED_LOCALES.map((option) => (
             <LanguageCard

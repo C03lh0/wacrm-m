@@ -185,7 +185,7 @@ export function Step4ScheduleSend({
             <p className="text-foreground">{audienceLabel}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Estimated Reach</p>
+            <p className="text-xs text-muted-foreground">{t('scheduleSend.estimatedReach')}</p>
             <div className="flex items-center gap-1.5">
               {loadingReach ? (
                 <Loader2 className="h-3 w-3 animate-spin text-primary" />
@@ -199,7 +199,7 @@ export function Step4ScheduleSend({
           </div>
           {template && (
             <div>
-              <p className="text-xs text-muted-foreground">Language</p>
+              <p className="text-xs text-muted-foreground">{t('scheduleSend.language')}</p>
               <p className="text-foreground">{template.language ?? 'en_US'}</p>
             </div>
           )}
@@ -264,7 +264,9 @@ export function Step4ScheduleSend({
           <DialogContent className="border-border bg-popover sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-popover-foreground">
-                {isScheduling ? t('scheduleSend.confirmScheduleTitle') : 'Confirm Broadcast'}
+                {isScheduling
+                  ? t('scheduleSend.confirmScheduleTitle')
+                  : t('scheduleSend.confirmTitle')}
               </DialogTitle>
               <DialogDescription className="text-muted-foreground">
                 {isScheduling ? (
@@ -274,13 +276,13 @@ export function Step4ScheduleSend({
                     time: new Date(scheduledAt).toLocaleString(),
                   })
                 ) : template ? (
-                  <>
-                    You are about to send this broadcast to{' '}
-                    <span className="font-medium text-popover-foreground">{estimatedReach.toLocaleString()}</span>{' '}
-                    contacts using the{' '}
-                    <span className="font-medium text-popover-foreground">{template.name}</span> template.
-                    This action cannot be undone.
-                  </>
+                  t.rich('scheduleSend.confirmDesc', {
+                    count: estimatedReach,
+                    template: template.name,
+                    b: (chunks) => (
+                      <span className="font-medium text-popover-foreground">{chunks}</span>
+                    ),
+                  })
                 ) : (
                   <>
                     You are about to send this plain-text broadcast to{' '}

@@ -15,7 +15,7 @@ interface Turn {
 }
 
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
-  const t = useTranslations('AiPlayground');
+  const t = useTranslations('Agents.playground');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -45,9 +45,9 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (data.code === 'ai_not_configured') {
-          toast.error(t('toastNotConfigured'));
+          toast.error(t('notConfigured'));
         } else {
-          toast.error(data.error ?? t('toastReplyFailed'));
+          toast.error(data.error ?? t('noReply'));
         }
         // Roll the unsent user turn back so the transcript stays clean.
         setTurns(turns);
@@ -66,7 +66,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
         },
       ]);
     } catch {
-      toast.error(t('toastUnreachable'));
+      toast.error(t('unreachable'));
       setTurns(turns);
       setInput(text);
     } finally {
@@ -87,7 +87,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium text-foreground">{t('header')}</span>
+          <span className="text-sm font-medium text-foreground">{t('title')}</span>
           <span className="text-xs text-muted-foreground">
             {t('subtitle')}
           </span>
@@ -110,7 +110,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
             <Bot className="mb-2 h-8 w-8 text-muted-foreground/60" />
             <p>{t('emptyTitle')}</p>
             <p className="mt-1 text-xs">
-              {t('emptyHint')}
+              {t('emptyDesc')}
             </p>
             {onGoToSetup && (
               <Button
@@ -153,7 +153,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                   )}
                 >
                   <UserCircle2 className="h-3.5 w-3.5" />
-                  {t('handoffNotice')}
+                  {t('handoff')}
                 </p>
               )}
             </div>
@@ -177,7 +177,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={t('inputPlaceholder')}
+          placeholder={t('placeholder')}
           rows={1}
           className="flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
         />

@@ -12,15 +12,24 @@ function request(body: unknown) {
 
 describe('POST /api/locale', () => {
   it('accepts a supported locale and sets the cookie', async () => {
-    const response = await POST(request({ locale: 'pt-BR' }));
+    const response = await POST(request({ locale: 'pt' }));
     expect(response.status).toBe(200);
 
     const json = await response.json();
-    expect(json).toEqual({ locale: 'pt-BR' });
+    expect(json).toEqual({ locale: 'pt' });
 
     const setCookie = response.headers.get('set-cookie') ?? '';
-    expect(setCookie).toContain('NEXT_LOCALE=pt-BR');
+    expect(setCookie).toContain('NEXT_LOCALE=pt');
     expect(setCookie.toLowerCase()).toContain('path=/');
+  });
+
+  it('heals a legacy pt-BR request into the canonical pt cookie', async () => {
+    const response = await POST(request({ locale: 'pt-BR' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ locale: 'pt' });
+    expect(response.headers.get('set-cookie') ?? '').toContain(
+      'NEXT_LOCALE=pt;'
+    );
   });
 
   it('rejects an unsupported locale', async () => {

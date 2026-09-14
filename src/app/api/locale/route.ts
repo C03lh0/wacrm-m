@@ -5,14 +5,18 @@
 // chosen language (src/i18n/request.ts reads it via resolveLocale).
 // Not account-scoped, not authenticated — the locale choice is a
 // per-browser UI preference, same trust level as the theme/mode
-// choice already stored in localStorage. Only the two UI-supported
+// choice already stored in localStorage. Only the UI-supported
 // locales (see SUPPORTED_LOCALES) can be set this way; `ko` stays
 // reachable only via NEXT_PUBLIC_APP_LOCALE.
 // ============================================================
 
 import { NextResponse } from 'next/server';
 
-import { LOCALE_COOKIE, isSupportedLocale } from '@/lib/i18n/locales';
+import {
+  LOCALE_COOKIE,
+  isSupportedLocale,
+  resolveLocale,
+} from '@/lib/i18n/locales';
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // 1 year
 
@@ -25,8 +29,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unsupported locale' }, { status: 400 });
   }
 
-  const response = NextResponse.json({ locale });
-  response.cookies.set(LOCALE_COOKIE, locale, {
+  // Store the canonical spelling rather than whatever came in, so a
+  // legacy alias (`pt-BR`) is healed on the way through instead of
+  // being written back for another year.
+  const canonical = resolveLocale(locale, undefined);
+
+  const response = NextResponse.json({ locale: canonical });
+  response.cookies.set(LOCALE_COOKIE, canonical, {
     path: '/',
     maxAge: COOKIE_MAX_AGE_SECONDS,
     sameSite: 'lax',

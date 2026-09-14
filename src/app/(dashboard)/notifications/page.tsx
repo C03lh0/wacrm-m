@@ -19,8 +19,8 @@ const TYPE_ICON: Record<Notification["type"], typeof Bell> = {
 };
 
 export default function NotificationsPage() {
-  const router = useRouter();
   const t = useTranslations("Notifications");
+  const router = useRouter();
   const { accountId } = useAuth();
   const [notifications, setNotifications] = useState<Notification[] | null>(
     null,
@@ -106,7 +106,7 @@ export default function NotificationsPage() {
         .eq("id", id)
         .is("read_at", null);
       if (updateErr) {
-        toast.error(t("toastMarkReadFailed"));
+        toast.error(t("markReadFailed"));
         load();
       }
     },
@@ -139,7 +139,7 @@ export default function NotificationsPage() {
       .is("read_at", null);
     setMarkingAll(false);
     if (updateErr) {
-      toast.error(t("toastMarkAllFailed"));
+      toast.error(t("markAllFailed"));
       load();
     }
   }, [unreadIds.length, load, t]);
@@ -196,7 +196,7 @@ export default function NotificationsPage() {
             {t("emptyTitle")}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t("emptyHint")}
+            {t("emptyDesc")}
           </p>
         </div>
       ) : (
@@ -242,7 +242,7 @@ export default function NotificationsPage() {
                       </span>
                       {isUnread && (
                         <span
-                          aria-label={t("unreadAriaLabel")}
+                          aria-label={t("unread")}
                           className="h-2 w-2 flex-shrink-0 rounded-full bg-primary"
                         />
                       )}
