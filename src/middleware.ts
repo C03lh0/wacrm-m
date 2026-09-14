@@ -1,6 +1,12 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+import {
+  RECOVERY_COOKIE,
+  RESET_PASSWORD_PATH,
+  isRecoveryAllowedPath,
+} from '@/lib/auth/recovery'
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -35,11 +41,39 @@ export async function middleware(request: NextRequest) {
   // the session wedges — the user gets a broken reload after idling and
   // can only recover by manually clearing cookies (issue #288). Copy the
   // refreshed cookies onto whatever response we hand back to fix that.
+  //
+  // The same helper also clears a stale password-recovery marker: a
+  // marker with no session behind it (the user signed out from the
+  // reset screen, or the session expired) is dead weight that would
+  // otherwise lock this browser out of pages it's entitled to.
+  const staleRecoveryCookie = !user && request.cookies.has(RECOVERY_COOKIE)
+
   const withRefreshedCookies = <T extends NextResponse>(response: T): T => {
     supabaseResponse.cookies.getAll().forEach((cookie) => {
       response.cookies.set(cookie)
     })
+    if (staleRecoveryCookie) {
+      response.cookies.delete(RECOVERY_COOKIE)
+    }
     return response
+  }
+
+  // Password-recovery lock. A session minted by a reset-email link is
+  // an ordinary session, so without this it grants the whole app to
+  // anyone who opens the email — and "back to sign in" would hit the
+  // already-authenticated rule below and land on /dashboard instead of
+  // the login form. While the marker cookie is present the only
+  // reachable pages are the reset form and the endpoint that lifts the
+  // lock. MUST come before the auth-pages rule for that reason.
+  const recoveryCookie = request.cookies.get(RECOVERY_COOKIE)
+
+  if (user && recoveryCookie) {
+    if (!isRecoveryAllowedPath(request.nextUrl.pathname)) {
+      const url = request.nextUrl.clone()
+      url.pathname = RESET_PASSWORD_PATH
+      url.search = ''
+      return withRefreshedCookies(NextResponse.redirect(url))
+    }
   }
 
   // Auth pages - redirect to dashboard if already logged in.
@@ -85,7 +119,7 @@ export async function middleware(request: NextRequest) {
     )
   }
 
-  return supabaseResponse
+  return withRefreshedCookies(supabaseResponse)
 }
 
 export const config = {

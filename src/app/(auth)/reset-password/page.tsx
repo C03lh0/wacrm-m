@@ -79,6 +79,12 @@ export default function ResetPasswordPage() {
       return;
     }
 
+    // The session that got us here is locked to this page by an
+    // httpOnly cookie (src/lib/auth/recovery.ts). Now that the password
+    // actually changed, ask the server to lift the lock — otherwise the
+    // middleware keeps bouncing every other route back here.
+    await fetch("/api/auth/recovery-complete", { method: "POST" });
+
     setSuccess(true);
     setSaving(false);
   };

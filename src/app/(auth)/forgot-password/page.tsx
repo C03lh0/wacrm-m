@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -43,6 +42,25 @@ export default function ForgotPasswordPage() {
     setLoading(false);
   };
 
+  /**
+   * Clicking a reset link mints a real session, so by the time someone
+   * comes back to this page the browser may already be signed in — and
+   * a plain <Link href="/login"> would hit the middleware's
+   * already-authenticated rule and dump them on /dashboard instead of
+   * the login form. Sign out first, then navigate with a full page load
+   * so the middleware re-reads the cleared cookies. With no session,
+   * signOut() is a no-op.
+   */
+  const handleBackToSignIn = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Navigating to /login matters more than a clean sign-out call;
+      // the middleware drops a session-less recovery marker anyway.
+    }
+    window.location.href = "/login";
+  };
+
   if (success) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -64,14 +82,13 @@ export default function ForgotPasswordPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/login">
-              <Button
-                variant="outline"
-                className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                {t("backToSignIn")}
-              </Button>
-            </Link>
+            <Button
+              variant="outline"
+              onClick={handleBackToSignIn}
+              className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {t("backToSignIn")}
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -122,13 +139,14 @@ export default function ForgotPasswordPage() {
             </Button>
           </form>
 
-          <Link
-            href="/login"
-            className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          <button
+            type="button"
+            onClick={handleBackToSignIn}
+            className="mt-6 flex w-full items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
             {t("backToSignIn")}
-          </Link>
+          </button>
         </CardContent>
       </Card>
     </div>

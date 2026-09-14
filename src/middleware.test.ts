@@ -111,3 +111,78 @@ describe("middleware — refreshed auth cookies survive redirects", () => {
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
   });
 });
+
+// A session minted by a password-reset email is an ordinary session, so
+// without this lock the reset link is a one-click login: open the email,
+// land on /dashboard, never set a password. "Back to sign in" was also
+// bouncing off the already-authenticated rule straight into the app.
+describe("middleware — password-recovery lock", () => {
+  const withMarker = (url: string) => {
+    const request = new NextRequest(url);
+    request.cookies.set("pw-recovery", "2026-09-14T10:00:00Z");
+    return request;
+  };
+
+  it("sends a locked recovery session on /dashboard back to /reset-password", async () => {
+    mockUser = { id: "user-1" };
+
+    const res = await middleware(withMarker("https://app.test/dashboard"));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/reset-password");
+  });
+
+  it("sends a locked recovery session on /login back to /reset-password", async () => {
+    mockUser = { id: "user-1" };
+
+    const res = await middleware(withMarker("https://app.test/login"));
+
+    expect(res.headers.get("location")).toContain("/reset-password");
+    expect(res.headers.get("location")).not.toContain("/dashboard");
+  });
+
+  it("lets a locked recovery session reach /reset-password itself", async () => {
+    mockUser = { id: "user-1" };
+
+    const res = await middleware(withMarker("https://app.test/reset-password"));
+
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("lets a locked recovery session reach the unlock endpoint", async () => {
+    mockUser = { id: "user-1" };
+
+    const res = await middleware(
+      withMarker("https://app.test/api/auth/recovery-complete"),
+    );
+
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("carries rotated cookies on the lock redirect", async () => {
+    mockUser = { id: "user-1" };
+    refreshedCookies = [ROTATED];
+
+    const res = await middleware(withMarker("https://app.test/contacts"));
+
+    expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
+  });
+
+  it("clears a marker left behind with no session", async () => {
+    mockUser = null;
+
+    const res = await middleware(withMarker("https://app.test/login"));
+
+    // Max-Age 0 / empty value — the browser drops it, so the next visit
+    // isn't locked out of pages it's entitled to.
+    expect(res.cookies.get("pw-recovery")?.value).toBe("");
+  });
+
+  it("does not lock a normal signed-in session", async () => {
+    mockUser = { id: "user-1" };
+
+    const res = await middleware(new NextRequest("https://app.test/dashboard"));
+
+    expect(res.headers.get("location")).toBeNull();
+  });
+});
