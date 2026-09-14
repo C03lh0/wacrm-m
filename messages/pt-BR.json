@@ -56,10 +56,12 @@
     "menuProfile": "Perfil",
     "menuSettings": "Configurações",
     "menuSignOut": "Sair",
+    "language": "Idioma",
     "switchLanguage": "Mudar idioma para {name}"
   },
   "ModeToggle": {
-    "switchMode": "Mudar para o modo {mode}"
+    "switchToLight": "Mudar para o modo claro",
+    "switchToDark": "Mudar para o modo escuro"
   },
   "AccountAccess": {
     "unlinkedTitle": "Este usuário não está vinculado a uma conta",
@@ -667,6 +669,7 @@
       "table": {
         "name": "Nome",
         "template": "Modelo",
+        "plainText": "Texto simples",
         "recipients": "Destinatários",
         "delivery": "Entrega",
         "read": "Lida",
@@ -692,6 +695,7 @@
       "backToBroadcasts": "Voltar às transmissões",
       "notFound": "Transmissão não encontrada",
       "template": "Modelo: {name}",
+      "plainText": "Transmissão em texto simples",
       "createdAt": "Criada em {date}",
       "deletePrompt": "Excluir esta transmissão?",
       "cancel": "Cancelar",
@@ -760,9 +764,14 @@
         "subtitle": "Selecione um modelo de mensagem aprovado para sua transmissão.",
         "noTemplates": "Nenhum modelo disponível.",
         "createFirst": "Crie um modelo em Configurações primeiro.",
-        "errorLoad": "Falha ao carregar modelos",
-        "evolutionTitle": "Modelos não estão disponíveis na Evolution",
-        "evolutionBody": "Transmissões exigem o sistema de modelos aprovados da Meta. Esta conta está conectada via Evolution (WhatsApp Web), que não tem equivalente."
+        "errorLoad": "Falha ao carregar modelos"
+      },
+      "composeText": {
+        "title": "Escreva sua mensagem",
+        "subtitle": "Esta conta está conectada via Evolution (WhatsApp Web) — transmissões são enviadas em texto simples, sem etapa de aprovação de modelo.",
+        "bodyLabel": "Mensagem",
+        "bodyPlaceholder": "Olá {{1}}, estamos abertos hoje até as 18h!",
+        "bodyHint": "Use {{1}}, {{2}}, ... como marcadores — você vai mapear cada um para um campo do contato ou um valor fixo na próxima etapa."
       },
       "selectAudience": {
         "title": "Selecionar público",
@@ -833,6 +842,7 @@
         "broadcastNamePlaceholder": "ex.: Promoção de Verão",
         "summary": "Resumo",
         "template": "Modelo:",
+        "plainTextLabel": "Transmissão em texto simples",
         "audience": "Público:",
         "audienceAll": "Todos os contatos",
         "audienceTags": "Filtrado por etiquetas",
@@ -1162,6 +1172,7 @@
       "nodesTitle": "Nós ({count})",
       "nodesEmpty": "Adicione um nó <strong>Início</strong>, depois um nó <strong>Enviar botões</strong>, depois um <strong>Transferir</strong> — esse é o formato de menu de boas-vindas do briefing.",
       "addNode": "Adicionar nó",
+      "nodeUnsupported": "Requer uma conta WhatsApp conectada via Meta — esta conta usa {provider}",
       "setAsEntry": "Definir como entrada",
       "removeNode": "Remover nó",
       "showAdvanced": "Mostrar avançado",

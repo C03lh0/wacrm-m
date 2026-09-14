@@ -56,10 +56,12 @@
     "menuProfile": "Profile",
     "menuSettings": "Settings",
     "menuSignOut": "Sign out",
+    "language": "Language",
     "switchLanguage": "Switch language to {name}"
   },
   "ModeToggle": {
-    "switchMode": "Switch to {mode} mode"
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode"
   },
   "AccountAccess": {
     "unlinkedTitle": "This user is not linked to an account",
@@ -667,6 +669,7 @@
       "table": {
         "name": "Name",
         "template": "Template",
+        "plainText": "Plain text",
         "recipients": "Recipients",
         "delivery": "Delivery",
         "read": "Read",
@@ -692,6 +695,7 @@
       "backToBroadcasts": "Back to Broadcasts",
       "notFound": "Broadcast not found",
       "template": "Template: {name}",
+      "plainText": "Plain-text broadcast",
       "createdAt": "Created {date}",
       "deletePrompt": "Delete this broadcast?",
       "cancel": "Cancel",
@@ -760,9 +764,14 @@
         "subtitle": "Select an approved message template for your broadcast.",
         "noTemplates": "No templates available.",
         "createFirst": "Create a template in Settings first.",
-        "errorLoad": "Failed to load templates",
-        "evolutionTitle": "Templates aren't available on Evolution",
-        "evolutionBody": "Broadcasts require Meta's approved-template system. This account is connected via Evolution (WhatsApp Web), which has no equivalent."
+        "errorLoad": "Failed to load templates"
+      },
+      "composeText": {
+        "title": "Write your message",
+        "subtitle": "This account is connected via Evolution (WhatsApp Web) — broadcasts send as plain text, with no template-approval step.",
+        "bodyLabel": "Message",
+        "bodyPlaceholder": "Hi {{1}}, we're open today until 6pm!",
+        "bodyHint": "Use {{1}}, {{2}}, ... as placeholders — you'll map each one to a contact field or a static value in the next step."
       },
       "selectAudience": {
         "title": "Select Audience",
@@ -833,6 +842,7 @@
         "broadcastNamePlaceholder": "e.g., Summer Promo",
         "summary": "Summary",
         "template": "Template:",
+        "plainTextLabel": "Plain-text broadcast",
         "audience": "Audience:",
         "audienceAll": "All contacts",
         "audienceTags": "Filtered by tags",
@@ -1163,6 +1173,7 @@
       "nodesTitle": "Nodes ({count})",
       "nodesEmpty": "Add a <strong>Start</strong> node, then a <strong>Send buttons</strong> node, then a <strong>Handoff</strong> — that's the welcome-menu shape from the brief.",
       "addNode": "Add node",
+      "nodeUnsupported": "Requires a Meta-connected WhatsApp account — this account uses {provider}",
       "setAsEntry": "Set as entry",
       "removeNode": "Remove node",
       "showAdvanced": "Show advanced",

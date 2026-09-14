@@ -401,9 +401,13 @@ export interface Broadcast {
   id: string;
   user_id: string;
   name: string;
-  template_name: string;
-  template_language: string;
+  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 044. */
+  send_mode?: 'template' | 'plain_text';
+  template_name: string | null;
+  template_language: string | null;
   template_variables?: Record<string, unknown>;
+  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 044. */
+  body_text?: string | null;
   audience_filter?: Record<string, unknown>;
   scheduled_at?: string;
   status: BroadcastStatus;

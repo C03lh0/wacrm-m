@@ -81,11 +81,13 @@ import {
   NODE_META,
   NodeIconChip,
   groupNodeTypesByCategory,
+  isNodeTypeSupported,
   nodeColors,
   summarizeNode,
   type BuilderNode,
   type NodeType,
 } from './shared';
+import { useWhatsAppConnectionStatus } from '@/hooks/use-whatsapp-connection-status';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -707,6 +709,7 @@ const ADD_NODE_TYPES: NodeType[] = [
 function CanvasAddNodeButton({ t }: { t: ReturnType<typeof useTranslations> }) {
   const reactFlow = useReactFlow();
   const { addNode, updateNodePosition } = useFlowEditor();
+  const { status: connectionStatus } = useWhatsAppConnectionStatus();
 
   const handleAdd = (type: NodeType) => {
     const key = addNode(type);
@@ -758,10 +761,12 @@ function CanvasAddNodeButton({ t }: { t: ReturnType<typeof useTranslations> }) {
               </DropdownMenuLabel>
               {group.types.map((t_type) => {
                 const meta = NODE_META[t_type];
-                return (
+                const supported = isNodeTypeSupported(t_type, connectionStatus.provider);
+                const item = (
                   <DropdownMenuItem
                     key={t_type}
-                    onClick={() => handleAdd(t_type)}
+                    disabled={!supported}
+                    onClick={() => supported && handleAdd(t_type)}
                     className="gap-3 py-2"
                   >
                     <NodeIconChip
@@ -779,6 +784,20 @@ function CanvasAddNodeButton({ t }: { t: ReturnType<typeof useTranslations> }) {
                       </span>
                     </span>
                   </DropdownMenuItem>
+                );
+                // Disabled base-ui Menu.Items don't fire mouseover in
+                // Safari/older Firefox, so a title on the item itself
+                // never renders — same fix as GatedButton's wrapping
+                // span (src/components/ui/gated-button.tsx).
+                return supported ? (
+                  item
+                ) : (
+                  <span
+                    key={t_type}
+                    title={t('nodeUnsupported', { provider: connectionStatus.provider ?? 'evolution' })}
+                  >
+                    {item}
+                  </span>
                 );
               })}
             </DropdownMenuGroup>

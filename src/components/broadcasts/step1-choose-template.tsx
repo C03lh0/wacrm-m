@@ -6,7 +6,6 @@ import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Loader2, FileText, ArrowRight } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useWhatsAppConnectionStatus } from '@/hooks/use-whatsapp-connection-status';
 
 const categoryColors: Record<string, string> = {
   Marketing: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
@@ -23,7 +22,6 @@ interface Step1Props {
 
 export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack }: Step1Props) {
   const t = useTranslations('Broadcasts.wizard');
-  const { status: connectionStatus, loading: statusLoading } = useWhatsAppConnectionStatus();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +51,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     fetchTemplates();
   }, []);
 
-  if (loading || statusLoading) {
+  if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -69,12 +67,9 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     );
   }
 
-  // Broadcasts are 100% template-based, and templates are a Meta-only
-  // concept (Evolution/WhatsApp Web has no template-approval workflow).
-  // Show why rather than letting the user pick a template that would
-  // 400 at broadcast time.
-  const isEvolution = connectionStatus.provider === 'evolution';
-
+  // Evolution-connected accounts never reach this component — the
+  // wizard renders Step1PlainTextBody for them instead, since
+  // Evolution has no template-approval workflow (see new/page.tsx).
   return (
     <div className="space-y-6">
       <div>
@@ -84,17 +79,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         </p>
       </div>
 
-      {isEvolution ? (
-        <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-border bg-card/50 px-6 text-center">
-          <FileText className="mb-2 h-8 w-8 text-muted-foreground" />
-          <p className="text-sm font-medium text-foreground">
-            {t('chooseTemplate.evolutionTitle')}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t('chooseTemplate.evolutionBody')}
-          </p>
-        </div>
-      ) : templates.length === 0 ? (
+      {templates.length === 0 ? (
         <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-border bg-card/50">
           <FileText className="mb-2 h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{t('chooseTemplate.noTemplates')}</p>
@@ -143,7 +128,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         </Button>
         <Button
           onClick={onNext}
-          disabled={isEvolution || !selectedTemplate}
+          disabled={!selectedTemplate}
           className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {t('next')}

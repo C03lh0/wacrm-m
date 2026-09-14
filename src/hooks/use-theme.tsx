@@ -4,8 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -28,8 +27,29 @@ import {
  *
  * The boot script in `src/app/layout.tsx` has already applied both
  * `data-theme` and `data-mode` before React hydrates, so by the time
- * this Provider mounts the page is already painted correctly. We just
- * read what's there and keep it in sync going forward.
+ * this Provider mounts the page is already painted correctly. Those two
+ * attributes are the store: we read them through `useSyncExternalStore`
+ * rather than mirroring them into React state, so there is no second
+ * copy that can disagree with the DOM.
+ *
+ * That hook is also what makes this hydration-safe. The server renders
+ * the defaults, the boot script may have put something else on <html>,
+ * and hydration compares the two — reading the DOM during the first
+ * client render would make every mode-dependent child (ModeToggle, the
+ * settings panels) differ from the server HTML and blow up hydration.
+ * `<html>` itself is `suppressHydrationWarning`, its children are not.
+ * `getServerSnapshot` returns the defaults and React uses it for the
+ * hydration render too, then swaps in the real values right after.
+ * See `use-theme.test.tsx`.
+ *
+ * The page itself does not flash across that swap: the light/dark
+ * surfaces are CSS keyed off `data-mode`, which the boot script already
+ * set, and ModeToggle picks both its icon and its accessible name the
+ * same way. Consumers that render `mode`/`theme` as React output — the
+ * settings panels' selected-chip state — do briefly show the default
+ * before the swap lands. That is the deliberate trade: a one-frame
+ * wrong highlight on one screen, rather than a hydration error on
+ * every screen.
  *
  * Persistence is localStorage only (device-scoped). A future
  * follow-up could mirror to `profiles.preferences` for cross-device
@@ -47,7 +67,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function readInitialTheme(): ThemeId {
+function readAppliedTheme(): ThemeId {
   if (typeof window === "undefined") return DEFAULT_THEME;
   // Whatever the boot script applied is the truth. Fall back to
   // localStorage / default if for some reason the attribute is missing
@@ -63,7 +83,7 @@ function readInitialTheme(): ThemeId {
   return DEFAULT_THEME;
 }
 
-function readInitialMode(): Mode {
+function readAppliedMode(): Mode {
   if (typeof window === "undefined") return DEFAULT_MODE;
   const fromAttr = document.documentElement.dataset.mode;
   if (isMode(fromAttr)) return fromAttr;
@@ -76,25 +96,70 @@ function readInitialMode(): Mode {
   return DEFAULT_MODE;
 }
 
+/**
+ * The `<html>` dataset IS the store — no React state mirrors it, so the
+ * attribute the boot script wrote and what components render can never
+ * drift apart. Subscribers are notified when this tab writes (`emit`)
+ * or when another tab does (the `storage` listener below).
+ */
+const listeners = new Set<() => void>();
+
+function emit() {
+  for (const listener of listeners) listener();
+}
+
+function onStorage(e: StorageEvent) {
+  if (e.key === STORAGE_KEY && isThemeId(e.newValue)) {
+    document.documentElement.dataset.theme = e.newValue;
+    emit();
+    return;
+  }
+  if (e.key === MODE_STORAGE_KEY && isMode(e.newValue)) {
+    document.documentElement.dataset.mode = e.newValue;
+    emit();
+  }
+}
+
+function subscribe(listener: () => void) {
+  // Sync from other tabs — change theme or mode in tab A, tab B catches
+  // up without a refresh. One shared listener, however many subscribers.
+  if (listeners.size === 0) window.addEventListener("storage", onStorage);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) window.removeEventListener("storage", onStorage);
+  };
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>(readInitialTheme);
-  const [mode, setModeState] = useState<Mode>(readInitialMode);
+  // The third argument is the server snapshot, which React also uses for
+  // the hydration render — that's what keeps children matching the
+  // server HTML. See the note above.
+  const theme = useSyncExternalStore(
+    subscribe,
+    readAppliedTheme,
+    () => DEFAULT_THEME,
+  );
+  const mode = useSyncExternalStore(
+    subscribe,
+    readAppliedMode,
+    () => DEFAULT_MODE,
+  );
 
   const setTheme = useCallback((next: ThemeId) => {
-    setThemeState(next);
     if (typeof document !== "undefined") {
       document.documentElement.dataset.theme = next;
     }
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      // Same private-browsing edge case as above; the in-memory state
-      // still updates so the current tab works for the session.
+      // Same private-browsing edge case as above; the attribute still
+      // changed, so the current tab works for the session.
     }
+    emit();
   }, []);
 
   const setMode = useCallback((next: Mode) => {
-    setModeState(next);
     if (typeof document !== "undefined") {
       document.documentElement.dataset.mode = next;
     }
@@ -103,33 +168,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       // Same private-browsing edge case as above.
     }
+    emit();
   }, []);
 
   const toggleMode = useCallback(() => {
     setMode(mode === "dark" ? "light" : "dark");
   }, [mode, setMode]);
-
-  // Sync from other tabs — change theme or mode in tab A, tab B
-  // catches up without a refresh.
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === STORAGE_KEY) {
-        if (isThemeId(e.newValue) && e.newValue !== theme) {
-          setThemeState(e.newValue);
-          document.documentElement.dataset.theme = e.newValue;
-        }
-        return;
-      }
-      if (e.key === MODE_STORAGE_KEY) {
-        if (isMode(e.newValue) && e.newValue !== mode) {
-          setModeState(e.newValue);
-          document.documentElement.dataset.mode = e.newValue;
-        }
-      }
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [theme, mode]);
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, mode, setMode, toggleMode }}>
