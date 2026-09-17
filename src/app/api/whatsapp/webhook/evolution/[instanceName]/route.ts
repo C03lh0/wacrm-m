@@ -150,7 +150,20 @@ export async function POST(
     try {
       await processEvolutionWebhookEvent(connection, body)
     } catch (error) {
+      // A console line in a container log is not a signal anyone sees.
+      // Mirroring the failure onto the connection row puts it in front
+      // of the person who can act on it, which is the whole difference
+      // between "the inbox went quiet" and "the inbox went quiet
+      // because X".
       console.error('[evolution] error processing webhook:', error)
+      const detail = error instanceof Error ? error.message : String(error)
+      const { error: writeError } = await supabaseAdmin()
+        .from('whatsapp_connections')
+        .update({ last_error: `Webhook processing failed: ${detail}`.slice(0, 500) })
+        .eq('id', connection.id)
+      if (writeError) {
+        console.error('[evolution] could not persist webhook failure:', writeError.message)
+      }
     }
   })
 
@@ -214,6 +227,23 @@ async function processEvolutionWebhookEvent(connection: any, body: EvolutionWebh
       for (const msg of messages as EvolutionMessagePayload[]) {
         if (!msg?.key?.id) continue
         await processEvolutionMessage(db, connection, connection.created_by_user_id, msg)
+      }
+      // Stamped on delivery rather than on successful persistence, on
+      // purpose: this answers "is Evolution still reaching us", which
+      // is a different question from "did the message store". A
+      // connection that is receiving but failing to persist should look
+      // alive here and loud in `last_error` — conflating the two would
+      // hide one behind the other.
+      const { error: stampError } = await db
+        .from('whatsapp_connections')
+        .update({ last_inbound_at: new Date().toISOString() })
+        .eq('id', connection.id)
+      // Not fatal — the messages themselves are already stored. Logged
+      // rather than ignored because an unapplied migration 051 would
+      // otherwise make this a no-op that looks exactly like success,
+      // which is the failure mode this whole column exists to end.
+      if (stampError) {
+        console.error('[evolution] could not stamp last_inbound_at:', stampError.message)
       }
       break
     }

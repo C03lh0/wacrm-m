@@ -243,7 +243,7 @@ export interface Message {
   /**
    * MIME type of `media_url`'s content, as Meta reported it. Inbound
    * media only — outbound URLs already carry a filename and extension.
-   * Null on every row written before migration 042.
+   * Null on every row written before migration 047.
    */
   media_type?: string | null;
   template_name?: string;
@@ -420,12 +420,12 @@ export interface Broadcast {
   id: string;
   user_id: string;
   name: string;
-  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 044. */
+  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 049. */
   send_mode?: 'template' | 'plain_text';
   template_name: string | null;
   template_language: string | null;
   template_variables?: Record<string, unknown>;
-  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 044. */
+  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 049. */
   body_text?: string | null;
   audience_filter?: Record<string, unknown>;
   scheduled_at?: string;

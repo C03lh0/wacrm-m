@@ -1,59 +1,15 @@
-import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { encrypt } from '@/lib/whatsapp/encryption'
-import {
-  createInstance,
-  setInstanceWebhook,
-  setInstanceSettings,
-  getInstanceConnect,
-  logoutInstance,
-  DEFAULT_WEBHOOK_EVENTS,
-} from '@/lib/whatsapp/providers/evolution-api'
+import { logoutInstance } from '@/lib/whatsapp/providers/evolution-api'
 import { EvolutionApiError, evolutionErrorResponseBody } from '@/lib/whatsapp/evolution-errors'
 import { mapEvolutionStatus } from '@/lib/whatsapp/evolution-status'
-
-// Evolution QR codes follow the WhatsApp Web / Baileys pairing protocol,
-// whose codes are conventionally short-lived (~60s) — ASSUMPTION, confirm
-// against the target Evolution deployment's actual QR TTL.
-const QR_TTL_SECONDS = 60
-
-/**
- * Build the plain webhook callback URL — no secret embedded here.
- * URLs routinely end up in access logs, proxy logs, and browser/CLI
- * history, so the connection's auth secret is instead carried as a
- * custom `Authorization` header on the webhook delivery (see
- * webhookAuthHeaders below), never as part of the URL itself.
- */
-function buildWebhookUrl(instanceName: string): string {
-  // Reuses the app's existing canonical-URL var (also used by
-  // /api/account/invitations) rather than introducing a second one.
-  const appUrl = process.env.NEXT_PUBLIC_SITE_URL
-  if (!appUrl) {
-    throw new EvolutionApiError(
-      'EVOLUTION_INSTANCE_ERROR',
-      undefined,
-      'NEXT_PUBLIC_SITE_URL is not configured; cannot register an Evolution webhook callback.'
-    )
-  }
-  return `${appUrl.replace(/\/+$/, '')}/api/whatsapp/webhook/evolution/${encodeURIComponent(instanceName)}`
-}
-
-/**
- * Header carrying the connection's secret on every webhook delivery —
- * verified (constant-time) in the Evolution webhook route. ASSUMPTION:
- * Evolution API v2 forwards a `webhook.headers` object configured at
- * instance-create/webhook-set time; if the target deployment doesn't
- * support custom webhook headers, this header is simply never
- * presented back to us and verification falls back to skipping the
- * check (see verifyEvolutionWebhookAuth's own comment) rather than
- * failing closed — tightening that gap requires confirming the real
- * mechanism against the target deployment (see docs/evolution-api.md).
- */
-function webhookAuthHeaders(secret: string): Record<string, string> {
-  return { Authorization: `Bearer ${secret}` }
-}
+import {
+  provisionEvolutionInstance,
+  reprovisionConnection,
+  QR_TTL_SECONDS,
+} from '@/lib/whatsapp/evolution-provisioning'
 
 /**
  * GET /api/whatsapp/connections
@@ -67,7 +23,7 @@ export async function GET() {
 
     const { data: connection, error } = await ctx.supabase
       .from('whatsapp_connections')
-      .select('id, provider, status, phone_number, display_name, qr_code, qr_expires_at, connected_at, disconnected_at, last_error')
+      .select('id, provider, status, phone_number, display_name, qr_code, qr_expires_at, connected_at, disconnected_at, last_error, last_inbound_at')
       .eq('account_id', ctx.accountId)
       .maybeSingle()
 
@@ -113,51 +69,35 @@ export async function POST(request: Request) {
     // One connection per account (mirrors whatsapp_config's own rule).
     const { data: existing } = await ctx.supabase
       .from('whatsapp_connections')
-      .select('id')
+      .select('id, instance_name, status')
       .eq('account_id', ctx.accountId)
       .maybeSingle()
-    if (existing) {
+
+    // A live connection is the only thing this route still refuses.
+    //
+    // It used to refuse whenever ANY row existed, which combined with
+    // DELETE keeping the row around (see below) meant that once a
+    // connection broke there was no way to create a working one: POST
+    // said "disconnect it first" about a connection that was already
+    // disconnected. Every reconnect had to go through the QR route,
+    // which re-asked the same broken Evolution instance for a code.
+    if (existing && existing.status === 'connected') {
       return NextResponse.json(
         { error: 'This account already has a WhatsApp connection. Disconnect it before creating a new one.' },
         { status: 409 }
       )
     }
 
-    const instanceName = `wacrm-${ctx.accountId.slice(0, 8)}-${randomUUID().slice(0, 8)}`
-    const webhookSecret = randomUUID()
-    const webhookUrl = buildWebhookUrl(instanceName)
-    const webhookHeaders = webhookAuthHeaders(webhookSecret)
-
-    console.log(`[evolution] creating instance account=${ctx.accountId} instance=${instanceName}`)
-    const created = await createInstance({
-      instanceName,
-      webhookUrl,
-      webhookEvents: DEFAULT_WEBHOOK_EVENTS,
-      webhookHeaders,
-    })
-
-    // Some Evolution deployments require a separate webhook-set call
-    // rather than accepting webhook config inline at creation —
-    // idempotent, safe to call unconditionally.
-    await setInstanceWebhook({
-      instanceName,
-      url: webhookUrl,
-      events: DEFAULT_WEBHOOK_EVENTS,
-      headers: webhookHeaders,
-    })
-
-    // wacrm has no concept of group chats — without this, a group
-    // message would still hit the webhook and create a fake "contact"
-    // out of the group's JID (see setInstanceSettings's own comment).
-    await setInstanceSettings({ instanceName })
-
-    let qrCode = created.qrCode
-    if (!qrCode) {
-      console.log(`[evolution] requesting QR account=${ctx.accountId} instance=${instanceName}`)
-      const connectResult = await getInstanceConnect({ instanceName })
-      qrCode = connectResult.qrCode
+    // Reconnecting an existing row re-provisions in place: the old
+    // Evolution instance is deleted and a fresh one takes its slot on
+    // the same row, so `messages.connection_id` and the conversation
+    // history it anchors stay intact.
+    if (existing) {
+      const result = await reprovisionConnection(supabaseAdmin(), ctx.accountId, existing)
+      return NextResponse.json({ ...result, provider: 'evolution' })
     }
 
+    const provisioned = await provisionEvolutionInstance(ctx.accountId)
     const qrExpiresAt = new Date(Date.now() + QR_TTL_SECONDS * 1000).toISOString()
 
     const { data: row, error: insertError } = await supabaseAdmin()
@@ -166,11 +106,11 @@ export async function POST(request: Request) {
         account_id: ctx.accountId,
         created_by_user_id: ctx.userId,
         provider: 'evolution',
-        instance_name: instanceName,
+        instance_name: provisioned.instanceName,
         status: mapEvolutionStatus('connecting'),
-        qr_code: qrCode ?? null,
-        qr_expires_at: qrCode ? qrExpiresAt : null,
-        webhook_secret: encrypt(webhookSecret),
+        qr_code: provisioned.qrCode,
+        qr_expires_at: provisioned.qrCode ? qrExpiresAt : null,
+        webhook_secret: encrypt(provisioned.webhookSecret),
       })
       .select('id, status, qr_code, qr_expires_at')
       .single()
@@ -180,7 +120,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to save connection' }, { status: 500 })
     }
 
-    console.log(`[evolution] connection created account=${ctx.accountId} connectionId=${row.id} instance=${instanceName}`)
+    console.log(
+      `[evolution] connection created account=${ctx.accountId} connectionId=${row.id} instance=${provisioned.instanceName}`
+    )
 
     return NextResponse.json({
       connectionId: row.id,
@@ -202,9 +144,14 @@ export async function POST(request: Request) {
  * DELETE /api/whatsapp/connections
  *
  * Disconnects the account's Evolution connection: logs out the
- * instance (session-preserving, so reconnecting doesn't require
- * recreating it), clears the QR, marks the row disconnected. Message
- * history is never touched.
+ * instance, clears the QR, marks the row disconnected. Message history
+ * is never touched.
+ *
+ * The row is kept rather than deleted because `messages.connection_id`
+ * references it. Reconnecting therefore goes through POST, which
+ * re-provisions a brand-new Evolution instance onto this same row —
+ * the logout below is a courtesy to the Evolution side, not something
+ * the reconnect path depends on succeeding.
  */
 export async function DELETE() {
   try {

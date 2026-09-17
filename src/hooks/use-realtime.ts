@@ -11,7 +11,7 @@ interface RealtimeEvent<T> {
   old: Partial<T>;
 }
 
-/** whatsapp_connections row shape (migration 040) — Evolution QR/status flow. */
+/** whatsapp_connections row shape (migration 045) — Evolution QR/status flow. */
 export interface WhatsAppConnectionRow {
   id: string;
   account_id: string;
@@ -24,6 +24,12 @@ export interface WhatsAppConnectionRow {
   last_error: string | null;
   connected_at: string | null;
   disconnected_at: string | null;
+  /**
+   * When something last actually arrived (migration 051). A row that
+   * says "connected" while this sits days in the past is the shape a
+   * zombie session takes — the status alone never showed it.
+   */
+  last_inbound_at: string | null;
   is_syncing: boolean;
 }
 

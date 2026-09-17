@@ -68,9 +68,33 @@ docker run -d --env-file .env.local -e PORT=3000 -p 3000:3000 wacrm
   Attachment Storage; attachments received while it's off become
   unviewable once Meta drops them. Files over 16 MB (the bucket's
   limit) are never copied.
-- Nothing inside the container is scheduled. If you use automation
-  Wait steps or flows, point an external scheduler at
-  `GET /api/automations/cron` and `GET /api/flows/cron` on this
-  deployment, sending the shared secret in the `x-cron-secret` header
-  (`AUTOMATION_CRON_SECRET`, see `.env.local.example`). Both return
-  503 until that variable is set.
+- Nothing inside the container is scheduled. Point an external
+  scheduler at the cron endpoints below, sending the shared secret in
+  the `x-cron-secret` header (`AUTOMATION_CRON_SECRET`, see
+  `.env.local.example`). All of them return 503 until that variable is
+  set, and 401 without a matching header.
+
+  | Endpoint | Needed when | Suggested interval |
+  | --- | --- | --- |
+  | `GET /api/whatsapp/connections/cron` | **Always, on any Evolution (QR code) deployment.** | 5 min |
+  | `GET /api/automations/cron` | Automations use Wait steps | 1-5 min |
+  | `GET /api/flows/cron` | Flows are in use | 1-5 min |
+  | `GET /api/broadcasts/cron` | Broadcasts are scheduled or resumed | 1-5 min |
+
+  The connections cron is the one worth going out of your way for. A
+  WhatsApp session can die without Evolution ever emitting a
+  `CONNECTION_UPDATE`, and it can also go "zombie" — the socket keeps
+  reporting itself open while WhatsApp quietly stops routing anything
+  through it. Neither shows up in the UI on its own. With nothing on a
+  schedule, a connection sits at "connected" indefinitely while the
+  inbox receives nothing: observed in production as 19 days of silence
+  with a green status. This job is what notices, and what restarts a
+  zombie session automatically. It also re-registers the instance's
+  webhook if it has drifted from `NEXT_PUBLIC_SITE_URL`, which is the
+  other way inbound goes quiet with everything else looking healthy.
+
+  A host crontab entry is enough:
+
+  ```cron
+  */5 * * * * curl -fsS -H "x-cron-secret: YOUR_SECRET" https://crm.example.com/api/whatsapp/connections/cron >/dev/null
+  ```

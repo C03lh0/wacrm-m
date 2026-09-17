@@ -630,3 +630,85 @@ describe('findOrCreateContact — name backfill (#519 regression guard)', () => 
     expect(updates[0]).toMatchObject({ name: 'ada' });
   });
 });
+
+/**
+ * The production incident this guards against: the merge from upstream
+ * added the BSUID columns to this insert, but the matching migration was
+ * never applied to the live database because its version number collided
+ * with a fork migration and the tooling skipped it. Every inbound
+ * message from a not-yet-known contact then failed with
+ * `42703 column "wa_user_id" does not exist`, was not a unique violation,
+ * and fell through to a single console line. Sending kept working, so
+ * the connection looked healthy while the inbox silently stopped
+ * growing.
+ */
+describe('findOrCreateContact — schema drift', () => {
+  afterEach(() => {
+    findExistingContact.mockReset();
+  });
+
+  function makeFailingDb(error: { code?: string; message: string }) {
+    const db = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        }),
+        insert: () => ({
+          select: () => ({
+            single: () => Promise.resolve({ data: null, error }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient;
+    return db;
+  }
+
+  it('reports the SQLSTATE when the insert fails, not just the message', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const db = makeFailingDb({
+      code: '42703',
+      message: 'column "wa_user_id" of relation "contacts" does not exist',
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await findOrCreateContact(
+      db,
+      'acct-1',
+      'user-1',
+      identityFromPhone('15551230000', 'Ada')
+    );
+
+    expect(result).toBeNull();
+
+    const logged = errorSpy.mock.calls.map((args) => String(args[0])).join('\n');
+    // Naming the code is what turns "the inbox is broken" into "a
+    // migration was not applied" without a debugging session.
+    expect(logged).toContain('42703');
+    expect(logged).toMatch(/migration has not been applied/i);
+
+    errorSpy.mockRestore();
+  });
+
+  it('does not claim a migration is missing for an unrelated insert failure', async () => {
+    findExistingContact.mockResolvedValue(null);
+    const db = makeFailingDb({ code: '23503', message: 'foreign key violation' });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await findOrCreateContact(
+      db,
+      'acct-1',
+      'user-1',
+      identityFromPhone('15551230000', 'Ada')
+    );
+
+    const logged = errorSpy.mock.calls.map((args) => String(args[0])).join('\n');
+    expect(logged).toContain('23503');
+    expect(logged).not.toMatch(/migration has not been applied/i);
+
+    errorSpy.mockRestore();
+  });
+});

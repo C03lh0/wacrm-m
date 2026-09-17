@@ -37,7 +37,7 @@ export interface ParsedInboundContent {
   contentText: string | null
   mediaUrl: string | null
   /**
-   * The attachment's MIME type (migration 042). Without it the download
+   * The attachment's MIME type (migration 047). Without it the download
    * path had to guess an extension from the fetched blob, which was only
    * possible after the bytes were already fetched.
    */
@@ -279,7 +279,22 @@ export async function findOrCreateContact(
         if (racedByPhone) return { contact: racedByPhone, wasCreated: false }
       }
     }
-    console.error('[inbound-pipeline] error creating contact:', createError)
+    // Log the SQLSTATE, not just the message. This exact line is where
+    // an unapplied migration disappears: a `42703 column ... does not
+    // exist` (the BSUID columns from 040, say) is not a unique
+    // violation, so it falls through to here and the inbound message is
+    // dropped — one console line, no user-visible signal, sending still
+    // working. Naming the code makes a schema drift unmistakable
+    // instead of something to be inferred from a stack trace.
+    console.error(
+      `[inbound-pipeline] error creating contact (code=${createError.code ?? 'none'}): ${createError.message}`,
+      createError
+    )
+    if (createError.code === '42703') {
+      console.error(
+        '[inbound-pipeline] a column the insert needs is missing from this database — a migration has not been applied. Inbound messages from new contacts cannot be stored until it is.'
+      )
+    }
     return null
   }
 
@@ -425,7 +440,7 @@ export async function resolveContactAndConversation(
  * contact/conversation and fan out to the Flow runner, automations,
  * AI auto-reply, and the message.received outbound webhook.
  * Idempotent — a repeat delivery of the same providerMessageId is
- * detected via migration 041's messages_dedup_key unique index and
+ * detected via migration 046's messages_dedup_key unique index and
  * skipped (dispatch is not re-run).
  */
 export async function ingestParsedMessage(
@@ -448,7 +463,7 @@ export async function ingestParsedMessage(
   // Idempotency check — lookup-then-insert-then-resolve-on-conflict,
   // the same house pattern as findOrCreateContact/findOrCreateConversation
   // above, keyed on the (provider, connection_id, provider_message_id)
-  // unique index from migration 041.
+  // unique index from migration 046.
   const { data: existingMessage, error: dedupLookupError } = await db
     .from('messages')
     .select('id')
@@ -509,7 +524,7 @@ export async function ingestParsedMessage(
 
   if (msgError) {
     // Lost a race — a concurrent delivery of the same event inserted
-    // first and the unique index (migration 041) rejected ours.
+    // first and the unique index (migration 046) rejected ours.
     // Re-resolve instead of dropping the event or double-counting it.
     if (isUniqueViolation(msgError)) {
       const { data: raced } = await db

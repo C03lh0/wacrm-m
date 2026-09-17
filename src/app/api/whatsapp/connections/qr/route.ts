@@ -3,8 +3,7 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { getInstanceConnect } from '@/lib/whatsapp/providers/evolution-api'
 import { EvolutionApiError, evolutionErrorResponseBody } from '@/lib/whatsapp/evolution-errors'
-
-const QR_TTL_SECONDS = 60
+import { reprovisionConnection, QR_TTL_SECONDS } from '@/lib/whatsapp/evolution-provisioning'
 
 /**
  * POST /api/whatsapp/connections/qr
@@ -15,6 +14,14 @@ const QR_TTL_SECONDS = 60
  * timer-driven expiry, not on an interval, and connection status
  * itself is pushed via Supabase Realtime once the webhook updates the
  * row (see src/hooks/use-realtime.ts).
+ *
+ * If Evolution refuses to hand out a code for the existing instance,
+ * the instance is replaced rather than the error being passed to the
+ * user. An instance that has been logged out, restarted into a bad
+ * state, or deleted underneath us cannot be talked back into pairing,
+ * and before this fallback existed that answer was simply the end of
+ * the road: the reconnect button produced an error every time, with no
+ * other path in the UI that could create a working instance.
  */
 export async function POST() {
   try {
@@ -41,7 +48,27 @@ export async function POST() {
     }
 
     console.log(`[evolution] refreshing QR account=${ctx.accountId} connectionId=${connection.id}`)
-    const result = await getInstanceConnect({ instanceName: connection.instance_name })
+
+    let result
+    try {
+      result = await getInstanceConnect({ instanceName: connection.instance_name })
+    } catch (err) {
+      if (!(err instanceof EvolutionApiError)) throw err
+      // The instance can't produce a code. Replace it and return the
+      // new one — re-provisioning writes the row itself, so there is
+      // nothing left to persist below.
+      console.warn(
+        `[evolution] ${err.code} refreshing QR for instance=${connection.instance_name}; re-provisioning:`,
+        err.cause ?? err.message
+      )
+      const reprovisioned = await reprovisionConnection(
+        supabaseAdmin(),
+        ctx.accountId,
+        connection
+      )
+      return NextResponse.json({ ...reprovisioned, provider: 'evolution' })
+    }
+
     const qrExpiresAt = new Date(Date.now() + QR_TTL_SECONDS * 1000).toISOString()
 
     const { data: row, error: updateError } = await supabaseAdmin()

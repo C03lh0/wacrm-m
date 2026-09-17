@@ -253,6 +253,54 @@ export async function setInstanceWebhook(args: SetInstanceWebhookArgs): Promise<
   }
 }
 
+export interface FindInstanceWebhookArgs {
+  instanceName: string
+}
+
+export interface FindInstanceWebhookResult {
+  /** Null when Evolution has no webhook configured for the instance. */
+  url: string | null
+  enabled: boolean
+}
+
+/**
+ * Read back the webhook Evolution currently has registered for an
+ * instance.
+ *
+ * Exists because the webhook is otherwise written exactly once, at
+ * instance-creation time, and never verified again. If the CRM's public
+ * URL changes — a new domain, a rebuilt image with a different
+ * `NEXT_PUBLIC_SITE_URL` — Evolution keeps POSTing to the old address
+ * and the inbox simply stops receiving, with a connection that still
+ * reports itself healthy from both sides. The connections cron uses
+ * this to compare and repair.
+ *
+ * A 404 means "no webhook configured", not a failure: some Evolution
+ * versions answer that way for an instance that has never had one set.
+ */
+export async function findInstanceWebhook(
+  args: FindInstanceWebhookArgs
+): Promise<FindInstanceWebhookResult> {
+  const { instanceName } = args
+  const response = await evolutionFetch(`/webhook/find/${encodeURIComponent(instanceName)}`)
+
+  if (response.status === 404) {
+    return { url: null, enabled: false }
+  }
+  if (!response.ok) {
+    await throwEvolutionError(response, 'EVOLUTION_INSTANCE_ERROR')
+  }
+
+  const data = await response.json().catch(() => null)
+  // Shape differs by version: some return the webhook fields at the top
+  // level, others nest them under `webhook`. Read both rather than
+  // guessing, since a misread here silently triggers a re-registration
+  // loop on every cron tick.
+  const webhook = data?.webhook ?? data ?? {}
+  const url = typeof webhook.url === 'string' && webhook.url ? webhook.url : null
+  return { url, enabled: webhook.enabled !== false && url !== null }
+}
+
 export interface SetInstanceSettingsArgs {
   instanceName: string
 }

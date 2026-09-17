@@ -353,11 +353,11 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // the admin who saved the WhatsApp config.
           config.user_id,
           // whatsapp_config.id — the dedup/idempotency connection key
-          // (migration 041), Meta's equivalent of an Evolution instance id.
+          // (migration 046), Meta's equivalent of an Evolution instance id.
           config.id,
           decryptedAccessToken,
           // Default ON: the column is NOT NULL DEFAULT TRUE, but a row
-          // read before migration 042 lands would have it undefined,
+          // read before migration 047 lands would have it undefined,
           // and losing attachments is the failure mode worth avoiding.
           config.mirror_inbound_media !== false
         )
@@ -605,7 +605,7 @@ async function processMessage(
   // 041), Meta's equivalent of an Evolution instance id.
   connectionId: string,
   accessToken: string,
-  // Per-account opt-out for the inbound-media mirror (migration 042).
+  // Per-account opt-out for the inbound-media mirror (migration 047).
   // See parseMessageContent for what it turns off.
   mirrorMedia: boolean
 ) {
@@ -674,7 +674,7 @@ async function processMessage(
   // Persist + fan out to Flow/automations/AI auto-reply/message.received —
   // shared with the Evolution webhook. Idempotent: a repeat delivery of
   // the same message.id (Meta's wamid) for this whatsapp_config is
-  // detected via migration 041's dedup index and skipped rather than
+  // detected via migration 046's dedup index and skipped rather than
   // double-inserted.
   await ingestParsedMessage(supabaseAdmin(), resolved, {
     accountId,

@@ -1,5 +1,5 @@
 -- ============================================================
--- 044_broadcast_plain_text
+-- 049_broadcast_plain_text
 --
 -- Broadcasts have been 100% template-based (Meta-only) since 001 —
 -- templates are a Meta Cloud API concept, and Evolution/Baileys-style
@@ -23,7 +23,7 @@ ALTER TABLE broadcasts
   ADD COLUMN IF NOT EXISTS body_text TEXT;
 
 COMMENT ON COLUMN broadcasts.send_mode IS
-  '''template'' (Meta, approved template, default) or ''plain_text'' (Evolution, free-text body). See 044_broadcast_plain_text.sql.';
+  '''template'' (Meta, approved template, default) or ''plain_text'' (Evolution, free-text body). See 049_broadcast_plain_text.sql.';
 COMMENT ON COLUMN broadcasts.body_text IS
   'Plain-text body for send_mode=''plain_text'' broadcasts, with {{1}}/{{2}}-style positional placeholders resolved the same way template_variables are. NULL for send_mode=''template'' rows.';
 

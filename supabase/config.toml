@@ -13,6 +13,21 @@
 # reference version of this file.
 project_id = "wacrm"
 
+# Named here despite the note above, because this one is not a setting
+# so much as a trap. PostgREST caps every response at `max_rows`
+# whether or not the client asked for a limit, and the hosted default
+# is 1000. A query that orders ascending without its own limit
+# therefore returns the OLDEST 1000 rows and drops the rest in
+# silence — which is exactly how the inbox lost the newest messages of
+# any long conversation.
+#
+# Local defaults to unlimited, which hides that class of bug until
+# production finds it. Pinning the hosted value makes the local
+# database reproduce it instead. Keep aligned with
+# Dashboard → Settings → API → Max rows.
+[api]
+max_rows = 1000
+
 [db]
 port = 54322
 shadow_port = 54320

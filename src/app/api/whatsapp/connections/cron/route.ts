@@ -6,6 +6,7 @@ import { mapEvolutionStatus } from '@/lib/whatsapp/evolution-status'
 import { applyConnectionStatusUpdate } from '@/lib/whatsapp/evolution-connection-health'
 import { backfillMissedMessages, isEvolutionBackfillEnabled } from '@/lib/whatsapp/evolution-backfill'
 import { checkAndRecoverInstanceLiveness } from '@/lib/whatsapp/evolution-liveness'
+import { reconcileInstanceWebhook } from '@/lib/whatsapp/evolution-provisioning'
 
 // Mirrors src/app/api/whatsapp/webhook/evolution/[instanceName]/route.ts's
 // maxDuration — backfillMissedMessages can page through up to 20 requests
@@ -57,23 +58,27 @@ export async function GET(request: Request) {
   const admin = supabaseAdmin()
   const { data: connections, error } = await admin
     .from('whatsapp_connections')
-    .select('id, instance_name, status, account_id, created_by_user_id')
+    // `webhook_secret` is here for the reconciliation step below: the
+    // auth header has to be re-sent alongside any repaired webhook URL.
+    .select('id, instance_name, status, account_id, created_by_user_id, webhook_secret')
     .eq('provider', 'evolution')
     .in('status', ['connected', 'connecting', 'qr_required'])
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!connections || connections.length === 0) {
-    return NextResponse.json({ checked: 0, changed: 0, restarted: 0 })
+    return NextResponse.json({ checked: 0, changed: 0, restarted: 0, rewired: 0 })
   }
 
   let changed = 0
   let restarted = 0
+  let rewired = 0
   for (const connection of connections as {
     id: string
     instance_name: string
     status: string
     account_id: string
     created_by_user_id: string
+    webhook_secret: string | null
   }[]) {
     let rawState: string
     try {
@@ -118,7 +123,20 @@ export async function GET(request: Request) {
         console.error(`[evolution] liveness check failed for connection=${connection.id}:`, err)
       }
     }
+
+    // The webhook is registered once, when the instance is created, and
+    // was never checked again. If this deployment's public URL has
+    // changed since — a new domain, a rebuilt image carrying a
+    // different NEXT_PUBLIC_SITE_URL — Evolution is still delivering to
+    // the old address, and nothing about the connection looks wrong
+    // from either side: status reads "connected", sending works,
+    // and the inbox is simply silent. Reconcile it every tick.
+    try {
+      if (await reconcileInstanceWebhook(connection)) rewired++
+    } catch (err) {
+      console.error(`[evolution] webhook reconcile failed for connection=${connection.id}:`, err)
+    }
   }
 
-  return NextResponse.json({ checked: connections.length, changed, restarted })
+  return NextResponse.json({ checked: connections.length, changed, restarted, rewired })
 }

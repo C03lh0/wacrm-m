@@ -20,12 +20,20 @@ const { checkAndRecoverInstanceLiveness } = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/whatsapp/evolution-liveness', () => ({ checkAndRecoverInstanceLiveness }))
 
+const { reconcileInstanceWebhook } = vi.hoisted(() => ({
+  // Defaults to "nothing drifted", so the existing cases keep asserting
+  // the health-check behaviour they were written for.
+  reconcileInstanceWebhook: vi.fn(async (_c: { id: string }): Promise<boolean> => false),
+}))
+vi.mock('@/lib/whatsapp/evolution-provisioning', () => ({ reconcileInstanceWebhook }))
+
 interface FakeConnectionRow {
   id: string
   instance_name: string
   status: string
   account_id: string
   created_by_user_id: string
+  webhook_secret?: string | null
 }
 
 const h = vi.hoisted(() => ({
@@ -114,7 +122,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     h.state.connections = []
     const res = await GET(req('test-secret'))
     const json = await res.json()
-    expect(json).toEqual({ checked: 0, changed: 0, restarted: 0 })
+    expect(json).toEqual({ checked: 0, changed: 0, restarted: 0, rewired: 0 })
     expect(getInstanceStatus).not.toHaveBeenCalled()
   })
 
@@ -127,7 +135,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0 })
+    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0, rewired: 0 })
     expect(h.state.updateCalls).toHaveLength(1)
     expect(h.state.updateCalls[0]).toMatchObject({
       id: 'conn-1',
@@ -146,12 +154,65 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 1, changed: 0, restarted: 0 })
+    expect(json).toEqual({ checked: 1, changed: 0, restarted: 0, rewired: 0 })
     expect(h.state.updateCalls).toHaveLength(0)
     expect(backfillMissedMessages).not.toHaveBeenCalled()
     expect(checkAndRecoverInstanceLiveness).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'conn-1', instance_name: 'wacrm-acct1-0001' })
     )
+  })
+
+  // The failure this covers: the webhook is registered once at
+  // instance-creation time and never verified again, so a change to the
+  // deployment's public URL leaves Evolution delivering into the void
+  // while every other signal still reads healthy.
+  it('reconciles the webhook on every tick, even when the status did not change', async () => {
+    h.state.connections = [
+      {
+        id: 'conn-1',
+        instance_name: 'wacrm-acct1-0001',
+        status: 'connected',
+        account_id: 'acct-1',
+        created_by_user_id: 'user-1',
+        webhook_secret: 'cipher',
+      },
+    ]
+    getInstanceStatus.mockResolvedValue({ rawState: 'open' })
+
+    await GET(req('test-secret'))
+
+    expect(reconcileInstanceWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'conn-1', instance_name: 'wacrm-acct1-0001', webhook_secret: 'cipher' })
+    )
+  })
+
+  it('counts a repaired webhook in the response', async () => {
+    h.state.connections = [
+      { id: 'conn-1', instance_name: 'wacrm-acct1-0001', status: 'connected', account_id: 'acct-1', created_by_user_id: 'user-1' },
+    ]
+    getInstanceStatus.mockResolvedValue({ rawState: 'open' })
+    reconcileInstanceWebhook.mockResolvedValueOnce(true)
+
+    const res = await GET(req('test-secret'))
+    const json = await res.json()
+
+    expect(json).toEqual({ checked: 1, changed: 0, restarted: 0, rewired: 1 })
+  })
+
+  it('a webhook-reconcile failure does not stop the rest of the batch', async () => {
+    h.state.connections = [
+      { id: 'conn-1', instance_name: 'wacrm-acct1-0001', status: 'connected', account_id: 'acct-1', created_by_user_id: 'user-1' },
+      { id: 'conn-2', instance_name: 'wacrm-acct2-0002', status: 'connected', account_id: 'acct-2', created_by_user_id: 'user-2' },
+    ]
+    getInstanceStatus.mockResolvedValue({ rawState: 'open' })
+    reconcileInstanceWebhook.mockRejectedValueOnce(new Error('Evolution unreachable'))
+
+    const res = await GET(req('test-secret'))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json).toEqual({ checked: 2, changed: 0, restarted: 0, rewired: 0 })
+    expect(reconcileInstanceWebhook).toHaveBeenCalledTimes(2)
   })
 
   it('checks a qr_required/connecting connection too (not just connected) — query includes all non-terminal statuses', async () => {
@@ -164,7 +225,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const json = await res.json()
 
     expect(getInstanceStatus).toHaveBeenCalledWith({ instanceName: 'wacrm-acct1-0001' })
-    expect(json).toEqual({ checked: 1, changed: 0, restarted: 0 })
+    expect(json).toEqual({ checked: 1, changed: 0, restarted: 0, rewired: 0 })
     expect(checkAndRecoverInstanceLiveness).not.toHaveBeenCalled()
   })
 
@@ -181,7 +242,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 2, changed: 1, restarted: 0 })
+    expect(json).toEqual({ checked: 2, changed: 1, restarted: 0, rewired: 0 })
     expect(h.state.updateCalls).toHaveLength(1)
     expect(h.state.updateCalls[0].id).toBe('conn-2')
   })
@@ -195,7 +256,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0 })
+    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0, rewired: 0 })
     expect(backfillMissedMessages).toHaveBeenCalledTimes(1)
     const [, connectionArg, userIdArg] = backfillMissedMessages.mock.calls[0] as unknown as [
       unknown,
@@ -217,7 +278,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0 })
+    expect(json).toEqual({ checked: 1, changed: 1, restarted: 0, rewired: 0 })
     expect(backfillMissedMessages).not.toHaveBeenCalled()
   })
 
@@ -253,7 +314,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 1, changed: 0, restarted: 1 })
+    expect(json).toEqual({ checked: 1, changed: 0, restarted: 1, rewired: 0 })
     expect(h.state.updateCalls).toHaveLength(0)
   })
 
@@ -271,7 +332,7 @@ describe('GET /api/whatsapp/connections/cron', () => {
     const res = await GET(req('test-secret'))
     const json = await res.json()
 
-    expect(json).toEqual({ checked: 2, changed: 0, restarted: 1 })
+    expect(json).toEqual({ checked: 2, changed: 0, restarted: 1, rewired: 0 })
     expect(checkAndRecoverInstanceLiveness).toHaveBeenCalledTimes(2)
   })
 })

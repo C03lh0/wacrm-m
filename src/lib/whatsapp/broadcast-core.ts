@@ -12,7 +12,7 @@
 //                        retry), stamp each recipient row + the
 //                        aggregate counts, finalize status.
 //
-// Two send modes (`broadcasts.send_mode`, migration 044):
+// Two send modes (`broadcasts.send_mode`, migration 049):
 //   'template'   — Meta-only, requires an approved template
 //                  (`sendTemplate` on the resolved provider).
 //   'plain_text' — no template, just a body + {{1}}/{{2}} positional

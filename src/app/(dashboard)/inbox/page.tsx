@@ -17,6 +17,7 @@ import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
 import { Loader2, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { mergeMessages, messagesForThread } from "@/lib/inbox/merge-messages";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -480,9 +481,30 @@ function InboxPageInner() {
   }, [router]);
 
 
-  const handleMessagesLoaded = useCallback((loaded: Message[]) => {
-    setMessages(loaded);
-  }, []);
+  /**
+   * Accepts a fetched page of messages for one conversation and merges
+   * it into state, rather than replacing state outright.
+   *
+   * Merging matters for two reasons. The thread now fetches a bounded
+   * page instead of the whole history, so older pages the user has
+   * scrolled back through must survive the next resync. And a realtime
+   * INSERT can land between the query leaving and its rows arriving — a
+   * blind replace would drop that message until the next refetch, which
+   * is the class of bug this whole change is fixing.
+   *
+   * Scoped to one conversation on purpose: switching threads has to
+   * replace, never accumulate. Optimistic `temp-` rows are dropped, as
+   * the previous replace-everything behaviour already did; the realtime
+   * INSERT that confirms the send brings back the real row.
+   */
+  const handleMessagesLoaded = useCallback(
+    (loaded: Message[], conversationId: string) => {
+      setMessages((prev) =>
+        mergeMessages(messagesForThread(prev, conversationId), loaded)
+      );
+    },
+    []
+  );
 
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {

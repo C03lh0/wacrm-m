@@ -53,13 +53,34 @@ BEGIN
   -- 041 repairs create_broadcast_with_recipients, which 037/038 shipped
   -- with an ambiguous bare `RETURNING id, contact_id` (SQLSTATE 42702 on
   -- first call — plpgsql resolves names at execution, not CREATE, so a
-  -- plain replay can't catch it). Assert the qualified form is what's
-  -- actually installed.
+  -- plain replay can't catch it).
+  --
+  -- The signature asserted here is the 10-argument plain-text overload,
+  -- not 041's 8-argument one: migration 049 DROPs the 8-argument
+  -- function outright and replaces it, so on this branch the overload
+  -- below is the only one that exists and the only one the app calls.
+  -- 050 is what carries 041's qualified RETURNING into it — without
+  -- that migration this assertion fails, which is the point.
   IF pg_get_functiondef(
-       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[])'::regprocedure
+       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[],text,text)'::regprocedure
      ) NOT LIKE '%RETURNING id, broadcast_recipients.contact_id%' THEN
     RAISE EXCEPTION
-      'create_broadcast_with_recipients still has the ambiguous RETURNING — migration 041 did not apply';
+      'create_broadcast_with_recipients still has the ambiguous RETURNING — migration 050 did not apply';
+  END IF;
+
+  -- Exactly one overload must survive. Two of them (the 8-argument one
+  -- 041 creates plus the 10-argument one 049 creates) make any call
+  -- that leans on p_send_mode/p_body_text defaults fail with
+  -- "function ... is not unique". 050 drops the 8-argument signature
+  -- precisely so a database catching up out of order cannot end up
+  -- here, and this asserts it worked.
+  IF (
+    SELECT COUNT(*) FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'create_broadcast_with_recipients'
+  ) <> 1 THEN
+    RAISE EXCEPTION
+      'create_broadcast_with_recipients has more than one overload — named-argument calls will be ambiguous';
   END IF;
 
   -- The failure-reason columns (042) are only ever written by the
@@ -73,6 +94,70 @@ BEGIN
   ) <> 3 THEN
     RAISE EXCEPTION
       'messages.error_code/error_title/error_details are missing — migration 042 did not apply';
+  END IF;
+
+  -- ----------------------------------------------------------------
+  -- Fork-only line (Evolution API), migrations 045-049.
+  --
+  -- These were never asserted, which is how a whole branch of the
+  -- schema drifted out of production unnoticed: the numbering
+  -- collision that the 040-042 checks above cover only becomes
+  -- visible if the fork's own objects are checked too.
+  -- ----------------------------------------------------------------
+
+  -- 045: the table every Evolution connection, webhook lookup and
+  -- message row hangs off.
+  IF to_regclass('public.whatsapp_connections') IS NULL THEN
+    RAISE EXCEPTION
+      'public.whatsapp_connections is missing — migration 045 did not apply';
+  END IF;
+
+  -- 046: inbound idempotency. Without this index a redelivered
+  -- webhook silently duplicates the message instead of being skipped.
+  IF to_regclass('public.messages_dedup_key') IS NULL THEN
+    RAISE EXCEPTION
+      'messages_dedup_key is missing — migration 046 did not apply';
+  END IF;
+
+  -- 047: the MIME type the inbound media mirror needs to name a file.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'messages'
+      AND column_name = 'media_type'
+  ) THEN
+    RAISE EXCEPTION 'messages.media_type is missing — migration 047 did not apply';
+  END IF;
+
+  -- 048: the reconnect backfill guard.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'whatsapp_connections'
+      AND column_name = 'is_syncing'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_connections.is_syncing is missing — migration 048 did not apply';
+  END IF;
+
+  -- 049: plain-text broadcasts, the Evolution send mode.
+  IF (
+    SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'broadcasts'
+      AND column_name IN ('send_mode', 'body_text')
+  ) <> 2 THEN
+    RAISE EXCEPTION
+      'broadcasts.send_mode/body_text are missing — migration 049 did not apply';
+  END IF;
+
+  -- 051: the "is anything actually arriving" signal. Written by the
+  -- webhook on an untyped update, so a missing column is a runtime
+  -- PostgREST error on every inbound batch, not a compile error.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'whatsapp_connections'
+      AND column_name = 'last_inbound_at'
+  ) THEN
+    RAISE EXCEPTION
+      'whatsapp_connections.last_inbound_at is missing — migration 051 did not apply';
   END IF;
 
   RAISE NOTICE 'schema verification passed';

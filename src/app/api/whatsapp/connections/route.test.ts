@@ -9,25 +9,37 @@ vi.mock('@/lib/auth/account', async () => {
   return { ...actual, requireRole };
 });
 
-const { createInstance, setInstanceWebhook, setInstanceSettings, getInstanceConnect, logoutInstance } =
-  vi.hoisted(() => ({
-    createInstance: vi.fn(async () => ({ instanceName: 'wacrm-x', qrCode: 'base64-qr' })),
-    setInstanceWebhook: vi.fn(async () => {}),
-    setInstanceSettings: vi.fn(async () => {}),
-    getInstanceConnect: vi.fn(async () => ({ qrCode: 'base64-qr' })),
-    logoutInstance: vi.fn(async () => {}),
-  }));
+const {
+  createInstance,
+  setInstanceWebhook,
+  setInstanceSettings,
+  getInstanceConnect,
+  logoutInstance,
+  deleteInstance,
+  findInstanceWebhook,
+} = vi.hoisted(() => ({
+  createInstance: vi.fn(async () => ({ instanceName: 'wacrm-x', qrCode: 'base64-qr' })),
+  setInstanceWebhook: vi.fn(async () => {}),
+  setInstanceSettings: vi.fn(async () => {}),
+  getInstanceConnect: vi.fn(async () => ({ qrCode: 'base64-qr' })),
+  logoutInstance: vi.fn(async () => {}),
+  deleteInstance: vi.fn(async () => {}),
+  findInstanceWebhook: vi.fn(async () => ({ url: null, enabled: false })),
+}));
 vi.mock('@/lib/whatsapp/providers/evolution-api', () => ({
   createInstance,
   setInstanceWebhook,
   setInstanceSettings,
   getInstanceConnect,
   logoutInstance,
+  deleteInstance,
+  findInstanceWebhook,
   DEFAULT_WEBHOOK_EVENTS: ['CONNECTION_UPDATE'],
 }));
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
   encrypt: vi.fn((v: string) => `enc:${v}`),
+  decrypt: vi.fn((v: string) => v.replace(/^enc:/, '')),
 }));
 
 // ------------------------------------------------------------
@@ -150,13 +162,66 @@ describe('POST /api/whatsapp/connections', () => {
     expect(createInstance).not.toHaveBeenCalled();
   });
 
-  it('409s when the account already has a connection, without creating a second one', async () => {
-    connectionsByAccount['acct-1'] = { id: 'conn-existing' };
+  it('409s when the account already has a LIVE connection, without creating a second one', async () => {
+    connectionsByAccount['acct-1'] = {
+      id: 'conn-existing',
+      instance_name: 'wacrm-old',
+      status: 'connected',
+    };
     requireRole.mockResolvedValue(ctxFor('admin', 'acct-1'));
 
     const res = await post({ provider: 'evolution' });
     expect(res.status).toBe(409);
     expect(createInstance).not.toHaveBeenCalled();
+  });
+
+  // The dead end this replaces: POST refused whenever ANY row existed,
+  // and DELETE always left the row behind, so a broken connection could
+  // never be replaced with a working one from the UI.
+  it('re-provisions in place when the existing connection is not connected', async () => {
+    connectionsByAccount['acct-1'] = {
+      id: 'conn-existing',
+      instance_name: 'wacrm-old',
+      status: 'disconnected',
+    };
+    requireRole.mockResolvedValue(ctxFor('admin', 'acct-1'));
+
+    const res = await post({ provider: 'evolution' });
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.qrCode).toBe('base64-qr');
+
+    // The broken instance is torn down and a fresh one takes its place.
+    expect(deleteInstance).toHaveBeenCalledWith({ instanceName: 'wacrm-old' });
+    expect(createInstance).toHaveBeenCalledTimes(1);
+
+    // The row is updated, never duplicated — messages.connection_id
+    // points at it and the history must survive a reconnect.
+    expect(insertedRows).toHaveLength(0);
+    expect(adminUpdateCalls).toHaveLength(1);
+    expect(adminUpdateCalls[0].id).toBe('conn-existing');
+    expect(adminUpdateCalls[0].payload.instance_name).not.toBe('wacrm-old');
+    expect(adminUpdateCalls[0].payload.webhook_secret).toMatch(/^enc:/);
+  });
+
+  it('re-provisions even when tearing down the old instance fails', async () => {
+    connectionsByAccount['acct-1'] = {
+      id: 'conn-existing',
+      instance_name: 'wacrm-old',
+      status: 'error',
+    };
+    requireRole.mockResolvedValue(ctxFor('admin', 'acct-1'));
+    // The usual reason to be here is that the old instance is already
+    // broken or already gone. Refusing to reconnect because cleaning up
+    // a corpse failed would restore the dead end.
+    deleteInstance.mockRejectedValueOnce(new Error('instance not found'));
+
+    const res = await post({ provider: 'evolution' });
+
+    expect(res.status).toBe(200);
+    expect(createInstance).toHaveBeenCalledTimes(1);
+    expect(adminUpdateCalls).toHaveLength(1);
   });
 
   it('creates a connection scoped to the caller\'s own account and never leaks EVOLUTION_API_KEY in the response', async () => {

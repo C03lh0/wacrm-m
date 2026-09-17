@@ -26,7 +26,13 @@ on:
       - 'supabase/**'
       - '.github/workflows/migrations.yml'
   push:
-    branches: [main]
+    # The fork branches are listed alongside main deliberately. This
+    # check only ever ran on main, so the Evolution line of migrations
+    # shipped without a single clean-database replay — which is how two
+    # separate numbering collisions (037-039, then 040-042) reached
+    # production. A branch that carries migrations needs the check that
+    # validates them.
+    branches: [main, dev, byte-crm-system]
     paths:
       - 'supabase/**'
       - '.github/workflows/migrations.yml'
@@ -41,6 +47,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # Runs before the database is even started, because this failure
+      # has a much clearer message here than it does downstream.
+      #
+      # The CLI keys a migration on the numeric prefix it records in
+      # `supabase_migrations.schema_migrations.version`, so two files
+      # sharing a prefix are the same migration as far as it is
+      # concerned: `db reset` dies on a duplicate primary key, and
+      # `db push` against a database that already has that version
+      # skips BOTH files in silence. The second behaviour is the
+      # dangerous one — it drops a migration with a green checkmark.
+      #
+      # This happens on merges, where two branches each add the next
+      # number independently. The convention when it does: upstream
+      # keeps its number, the fork's own file is renumbered upward.
+      - name: Reject duplicate migration version prefixes
+        run: |
+          dupes=$(
+            ls supabase/migrations/*.sql \
+              | xargs -n1 basename \
+              | cut -d_ -f1 \
+              | sort \
+              | uniq -d
+          )
+          if [ -n "$dupes" ]; then
+            echo "::error::Two or more migrations share a version prefix."
+            for v in $dupes; do
+              echo "  version $v:"
+              for f in supabase/migrations/"$v"_*.sql; do
+                echo "    $f"
+              done
+            done
+            echo ""
+            echo "Renumber the fork's own file upward; leave upstream's number alone."
+            exit 1
+          fi
+          echo "No duplicate migration version prefixes."
 
       - name: Install the Supabase CLI
         uses: supabase/setup-cli@v3
