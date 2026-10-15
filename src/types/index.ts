@@ -243,7 +243,7 @@ export interface Message {
   /**
    * MIME type of `media_url`'s content, as Meta reported it. Inbound
    * media only — outbound URLs already carry a filename and extension.
-   * Null on every row written before migration 047.
+   * Null on every row written before migration 049.
    */
   media_type?: string | null;
   template_name?: string;
@@ -420,12 +420,12 @@ export interface Broadcast {
   id: string;
   user_id: string;
   name: string;
-  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 049. */
+  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 051. */
   send_mode?: 'template' | 'plain_text';
   template_name: string | null;
   template_language: string | null;
   template_variables?: Record<string, unknown>;
-  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 049. */
+  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 051. */
   body_text?: string | null;
   audience_filter?: Record<string, unknown>;
   scheduled_at?: string;
@@ -555,9 +555,17 @@ export interface SendMessageStepConfig {
  * `send_buttons` / `send_list` step configs carry the full interactive
  * payload (same shape stored on messages + quick replies). `kind` is
  * implied by the step_type but kept on the payload for a uniform shape.
+ *
+ * `wait_for_reply` parks the run after the send until the contact's
+ * next inbound message, which then becomes `message_text` for the
+ * steps after it (migration 045). Not part of the Meta payload — the
+ * send path picks payload fields explicitly, so it never reaches Meta.
  */
-export type SendButtonsStepConfig = InteractiveMessagePayload;
-export type SendListStepConfig = InteractiveMessagePayload;
+export interface InteractiveStepOptions {
+  wait_for_reply?: boolean;
+}
+export type SendButtonsStepConfig = InteractiveMessagePayload & InteractiveStepOptions;
+export type SendListStepConfig = InteractiveMessagePayload & InteractiveStepOptions;
 
 export interface SendTemplateStepConfig {
   template_name: string;

@@ -56,20 +56,20 @@ BEGIN
   -- plain replay can't catch it).
   --
   -- The signature asserted here is the 10-argument plain-text overload,
-  -- not 041's 8-argument one: migration 049 DROPs the 8-argument
+  -- not 041's 8-argument one: migration 051 DROPs the 8-argument
   -- function outright and replaces it, so on this branch the overload
   -- below is the only one that exists and the only one the app calls.
-  -- 050 is what carries 041's qualified RETURNING into it — without
+  -- 052 is what carries 041's qualified RETURNING into it — without
   -- that migration this assertion fails, which is the point.
   IF pg_get_functiondef(
        'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[],text,text)'::regprocedure
      ) NOT LIKE '%RETURNING id, broadcast_recipients.contact_id%' THEN
     RAISE EXCEPTION
-      'create_broadcast_with_recipients still has the ambiguous RETURNING — migration 050 did not apply';
+      'create_broadcast_with_recipients still has the ambiguous RETURNING — migration 052 did not apply';
   END IF;
 
   -- Exactly one overload must survive. Two of them (the 8-argument one
-  -- 041 creates plus the 10-argument one 049 creates) make any call
+  -- 041 creates plus the 10-argument one 051 creates) make any call
   -- that leans on p_send_mode/p_body_text defaults fail with
   -- "function ... is not unique". 050 drops the 8-argument signature
   -- precisely so a database catching up out of order cannot end up
@@ -97,7 +97,7 @@ BEGIN
   END IF;
 
   -- ----------------------------------------------------------------
-  -- Fork-only line (Evolution API), migrations 045-049.
+  -- Fork-only line (Evolution API), migrations 047-053.
   --
   -- These were never asserted, which is how a whole branch of the
   -- schema drifted out of production unnoticed: the numbering
@@ -109,14 +109,14 @@ BEGIN
   -- message row hangs off.
   IF to_regclass('public.whatsapp_connections') IS NULL THEN
     RAISE EXCEPTION
-      'public.whatsapp_connections is missing — migration 045 did not apply';
+      'public.whatsapp_connections is missing — migration 047 did not apply';
   END IF;
 
   -- 046: inbound idempotency. Without this index a redelivered
   -- webhook silently duplicates the message instead of being skipped.
   IF to_regclass('public.messages_dedup_key') IS NULL THEN
     RAISE EXCEPTION
-      'messages_dedup_key is missing — migration 046 did not apply';
+      'messages_dedup_key is missing — migration 048 did not apply';
   END IF;
 
   -- 047: the MIME type the inbound media mirror needs to name a file.
@@ -125,7 +125,7 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'messages'
       AND column_name = 'media_type'
   ) THEN
-    RAISE EXCEPTION 'messages.media_type is missing — migration 047 did not apply';
+    RAISE EXCEPTION 'messages.media_type is missing — migration 049 did not apply';
   END IF;
 
   -- 048: the reconnect backfill guard.
@@ -135,7 +135,7 @@ BEGIN
       AND column_name = 'is_syncing'
   ) THEN
     RAISE EXCEPTION
-      'whatsapp_connections.is_syncing is missing — migration 048 did not apply';
+      'whatsapp_connections.is_syncing is missing — migration 050 did not apply';
   END IF;
 
   -- 049: plain-text broadcasts, the Evolution send mode.
@@ -145,7 +145,7 @@ BEGIN
       AND column_name IN ('send_mode', 'body_text')
   ) <> 2 THEN
     RAISE EXCEPTION
-      'broadcasts.send_mode/body_text are missing — migration 049 did not apply';
+      'broadcasts.send_mode/body_text are missing — migration 051 did not apply';
   END IF;
 
   -- 051: the "is anything actually arriving" signal. Written by the
@@ -157,7 +157,65 @@ BEGIN
       AND column_name = 'last_inbound_at'
   ) THEN
     RAISE EXCEPTION
-      'whatsapp_connections.last_inbound_at is missing — migration 051 did not apply';
+      'whatsapp_connections.last_inbound_at is missing — migration 053 did not apply';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'storage' AND tablename = 'objects'
+      AND cmd IN ('SELECT', 'ALL')
+      AND (roles && ARRAY['public', 'anon']::name[])
+      AND (qual LIKE '%avatars%' OR qual LIKE '%flow-media%' OR qual LIKE '%chat-media%')
+  ) THEN
+    RAISE EXCEPTION
+      'a storage SELECT policy on avatars/flow-media/chat-media still applies to anon — migration 043 did not apply';
+  END IF;
+  IF (
+    SELECT COUNT(*) FROM pg_policies
+    WHERE schemaname = 'storage' AND tablename = 'objects' AND cmd = 'SELECT'
+      AND roles = ARRAY['authenticated']::name[]
+      AND policyname IN (
+        'Users can read their own avatar',
+        'Members can read flow media',
+        'Members can read chat media'
+      )
+  ) <> 3 THEN
+    RAISE EXCEPTION
+      'the scoped storage SELECT policies are missing — migration 043 did not apply';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(ARRAY[
+      'public._bcast_bump(uuid,text,integer)',
+      'public.recompute_broadcast_counts(uuid)',
+      'public.claim_ai_reply_slot(uuid,integer)',
+      'public.record_webhook_failure(uuid,integer)',
+      'public.merge_duplicate_contacts()',
+      'public.merge_duplicate_conversations()'
+    ]::regprocedure[]) AS f(fn)
+    WHERE has_function_privilege('anon', f.fn, 'EXECUTE')
+       OR has_function_privilege('authenticated', f.fn, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', f.fn, 'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION
+      'an internal SECURITY DEFINER function is still executable by anon/authenticated — migration 044 did not apply';
+  END IF;
+
+  -- 045 widens the automation_pending_executions status CHECK. It is a
+  -- DROP + ADD by name, so a wrong constraint name would leave the old
+  -- CHECK in place and every "wait for reply" park would be rejected at
+  -- runtime, not at migration time.
+  IF pg_get_constraintdef(
+       (SELECT oid FROM pg_constraint
+        WHERE conname = 'automation_pending_executions_status_check')
+     ) NOT LIKE '%awaiting_reply%' THEN
+    RAISE EXCEPTION
+      'automation_pending_executions_status_check does not allow awaiting_reply — migration 045 did not apply';
+  END IF;
+  IF to_regclass('public.idx_automation_pending_awaiting_reply') IS NULL THEN
+    RAISE EXCEPTION
+      'idx_automation_pending_awaiting_reply is missing — migration 045 did not apply';
   END IF;
 
   RAISE NOTICE 'schema verification passed';

@@ -63,7 +63,16 @@ const SECURITY_HEADERS = [
   },
 ] as const;
 
+const APP_LOCALE = ["en", "pt", "es", "ko"].includes(process.env.NEXT_PUBLIC_APP_LOCALE ?? "")
+  ? (process.env.NEXT_PUBLIC_APP_LOCALE as string)
+  : "en";
+
 const nextConfig: NextConfig = {
+  turbopack: {
+    resolveAlias: {
+      "@app-messages": `./messages/${APP_LOCALE}.json`,
+    },
+  },
   // Emit a self-contained server bundle (.next/standalone) so the
   // Docker image can run without node_modules or the Next CLI.
   // Harmless outside Docker: `next start` keeps working as before.
@@ -115,33 +124,12 @@ const nextConfig: NextConfig = {
    *     the correct production headers for hashed assets.
    *   - /api/*          — no-store. API responses are per-user and
    *     must never be shared across requests at the edge.
-   *   - Everything else — public, brief s-maxage + generous
-   *     stale-while-revalidate. The edge serves instantly from cache
-   *     for the first 5 min, then returns cached content while
-   *     refreshing in the background for up to 24 h. A deploy's
-   *     chunk-hash drift self-heals within ~5 min with no user-
-   *     visible latency.
-   *
-   *   Note: this used to say only the auth-gated dashboard routes
-   *   (/inbox, /contacts, /pipelines, /broadcasts, etc.) were dynamic
-   *   and thus already shielded from a shared cache by Next.js /
-   *   Supabase auth. That's no longer the whole picture: locale
-   *   resolution (src/i18n/request.ts) reads the NEXT_LOCALE cookie
-   *   inside getRequestConfig, which the root layout depends on — so
-   *   EVERY route, including the ~20 previously-static marketing/auth
-   *   pages (/, /login, /signup, /dashboard, /contacts, etc.), now
-   *   renders dynamically per request and embeds locale-specific text
-   *   in the HTML. A shared cache (CDN) honoring the s-maxage/
-   *   stale-while-revalidate below with no `Vary` would key purely on
-   *   URL and could serve one visitor's cookie-selected-locale HTML to
-   *   a different visitor with a different NEXT_LOCALE cookie for up
-   *   to 5 min (or up to 24 h under stale-while-revalidate). The
-   *   `Vary: Cookie` header on the rule below is what makes the
-   *   s-maxage strategy safe again: it tells any shared cache to key
-   *   entries on Cookie (including NEXT_LOCALE), not just the path.
-   *   The s-maxage here is still a ceiling; Next.js and auth
-   *   middleware still set `private` / `no-store` for per-user
-   *   responses.
+   *   - Everything else — private, no-store, plus `Vary: Cookie`. Page
+   *     HTML varies per request on the NEXT_LOCALE cookie (the
+   *     cookie-based locale switcher resolves it in
+   *     src/i18n/request.ts), so a shared cache must never key purely
+   *     on URL — `Vary: Cookie` makes that explicit even though
+   *     `no-store` already keeps these responses out of any cache.
    *
    * Security headers are appended via a separate catch-all rule
    * below — Next.js merges headers from every matching rule, so
@@ -159,8 +147,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value:
-              "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
+            value: "private, no-store",
           },
           {
             // Required now that this response's HTML content varies by

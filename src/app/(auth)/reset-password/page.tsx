@@ -1,8 +1,25 @@
 "use client";
 
+// ============================================================
+// /reset-password — the form the password-reset email leads to.
+//
+// The emailed link lands on /auth/callback, which exchanges it for a
+// session and 303s here. So on arrival the visitor either has a
+// recovery session (show the form) or doesn't (the link was spent,
+// expired, or opened in a browser without the PKCE verifier cookie —
+// say so, with a way to request a new one). Bouncing to /login with
+// no explanation was the locked-out experience issue #592 describes.
+//
+// Not gated by the middleware on purpose: the "expired" state must be
+// reachable signed-out, and a signed-in visitor must not be redirected
+// away from the very page they need.
+// ============================================================
+
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
+import { RECOVERY_COMPLETE_PATH } from "@/lib/auth/recovery";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,69 +30,52 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { KeyRound, Loader2 } from "lucide-react";
+import { CheckCircle, KeyRound, Loader2, MailX } from "lucide-react";
 
-const MIN_PASSWORD = 8;
+type Status = "checking" | "ready" | "expired" | "done";
 
-/**
- * Lands here only via /auth/callback?next=/reset-password after a
- * successful PKCE code exchange (see forgot-password/page.tsx and
- * src/app/auth/callback/route.ts) — by the time this page mounts, the
- * user already has a real session from the reset link. Direct
- * navigation or a stale/already-used link means no session exists, so
- * we bounce back to /forgot-password rather than show a form that
- * can't work.
- */
 export default function ResetPasswordPage() {
-  const router = useRouter();
+  const t = useTranslations("ResetPasswordPage");
   const supabase = createClient();
 
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [hasSession, setHasSession] = useState(false);
+  const [status, setStatus] = useState<Status>("checking");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    // The callback wrote the session cookies server-side; the browser
+    // client reads them here. No user → the link didn't yield a session.
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (cancelled) return;
-      if (!user) {
-        router.replace("/forgot-password");
-        return;
-      }
-      setHasSession(true);
-      setCheckingSession(false);
+      if (!cancelled) setStatus(user ? "ready" : "expired");
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (password.length < MIN_PASSWORD) {
-      setError(`Password must be at least ${MIN_PASSWORD} characters`);
+    if (password !== confirmPassword) {
+      setError(t("passwordsMismatch"));
       return;
     }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
+    // Same floor as /signup.
+    if (password.length < 6) {
+      setError(t("passwordTooShort"));
       return;
     }
 
     setSaving(true);
-    const { error: updateError } = await supabase.auth.updateUser({
-      password,
-    });
+    const { error } = await supabase.auth.updateUser({ password });
 
-    if (updateError) {
-      setError(updateError.message);
+    if (error) {
       setSaving(false);
+      setError(error.message);
       return;
     }
 
@@ -83,46 +83,86 @@ export default function ResetPasswordPage() {
     // httpOnly cookie (src/lib/auth/recovery.ts). Now that the password
     // actually changed, ask the server to lift the lock — otherwise the
     // middleware keeps bouncing every other route back here.
-    await fetch("/api/auth/recovery-complete", { method: "POST" });
+    await fetch(RECOVERY_COMPLETE_PATH, { method: "POST" });
 
-    setSuccess(true);
     setSaving(false);
+    setStatus("done");
   };
 
-  if (checkingSession || !hasSession) {
+  if (status === "checking") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("checking")}
+        </div>
       </div>
     );
   }
 
-  if (success) {
+  if (status === "expired") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md border-border bg-card">
+          <CardHeader className="items-center text-center">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10">
+              <MailX className="h-6 w-6 text-amber-400" />
+            </div>
+            <CardTitle className="text-xl text-foreground">
+              {t("expiredTitle")}
+            </CardTitle>
+            <CardDescription className="text-muted-foreground">
+              {t("expiredDesc")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <Link href="/forgot-password">
+              <Button className="h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                {t("requestNewLink")}
+              </Button>
+            </Link>
+            <Link href="/login">
+              <Button
+                variant="outline"
+                className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {t("backToSignIn")}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (status === "done") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <Card className="w-full max-w-md border-border bg-card">
           <CardHeader className="items-center text-center">
             <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <KeyRound className="h-6 w-6 text-primary" />
+              <CheckCircle className="h-6 w-6 text-primary" />
             </div>
             <CardTitle className="text-xl text-foreground">
-              Password updated
+              {t("successTitle")}
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              Your password has been changed and you&apos;re still signed in.
+              {t("successDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              className="h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={() => {
-                // Full navigation (not router.push) so the dashboard
-                // shell re-reads the session cookie fresh, matching
-                // how other post-auth transitions in this app work.
+                // Full-page navigation, like /login: the middleware
+                // gating /dashboard must see the session cookies on a
+                // fresh top-level request, which a soft router.push
+                // can race (issue #365).
+                // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- deliberate full reload so the auth cookies reach the middleware
                 window.location.href = "/dashboard";
               }}
             >
-              Go to dashboard
+              {t("continueToDashboard")}
             </Button>
           </CardContent>
         </Card>
@@ -137,11 +177,9 @@ export default function ResetPasswordPage() {
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
             <KeyRound className="h-6 w-6 text-primary" />
           </div>
-          <CardTitle className="text-xl text-foreground">
-            Set a new password
-          </CardTitle>
+          <CardTitle className="text-xl text-foreground">{t("title")}</CardTitle>
           <CardDescription className="text-muted-foreground">
-            Choose a new password for your account.
+            {t("desc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -154,16 +192,15 @@ export default function ResetPasswordPage() {
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="password" className="text-muted-foreground">
-                New password
+                {t("passwordLabel")}
               </Label>
               <Input
                 id="password"
                 type="password"
-                placeholder={`At least ${MIN_PASSWORD} characters`}
+                autoComplete="new-password"
+                placeholder={t("passwordPlaceholder")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD}
                 required
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
@@ -171,16 +208,15 @@ export default function ResetPasswordPage() {
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="confirmPassword" className="text-muted-foreground">
-                Confirm password
+                {t("confirmPasswordLabel")}
               </Label>
               <Input
                 id="confirmPassword"
                 type="password"
-                placeholder="Repeat your password"
+                autoComplete="new-password"
+                placeholder={t("confirmPasswordPlaceholder")}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD}
                 required
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
@@ -191,7 +227,7 @@ export default function ResetPasswordPage() {
               disabled={saving}
               className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {saving ? "Updating..." : "Update password"}
+              {saving ? t("saving") : t("submit")}
             </Button>
           </form>
         </CardContent>

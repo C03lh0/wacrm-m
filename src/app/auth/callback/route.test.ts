@@ -1,162 +1,167 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { NextRequest } from 'next/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextResponse } from 'next/server';
 
 import { RECOVERY_COOKIE } from '@/lib/auth/recovery';
 
-const { exchangeCodeForSession } = vi.hoisted(() => ({
+// The server client wraps `next/headers`, which has no request scope
+// under vitest — stub the whole module and script the two exchange
+// methods the route can call.
+const mocks = vi.hoisted(() => ({
   exchangeCodeForSession: vi.fn(),
+  verifyOtp: vi.fn(),
+  createClient: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    auth: { exchangeCodeForSession },
-  }),
+  createClient: mocks.createClient,
 }));
 
 import { GET } from './route';
 
-function request(query: string) {
-  return new NextRequest(`http://localhost:3000/auth/callback${query}`);
+function request(query: string): Request {
+  return new Request(`http://localhost:3000/auth/callback?${query}`);
 }
 
-function location(response: Response): string | null {
-  return response.headers.get('location');
-}
+const SESSION = { user: { updated_at: '2026-09-14T10:00:00Z' } };
+
+beforeEach(() => {
+  mocks.exchangeCodeForSession.mockResolvedValue({ data: SESSION, error: null });
+  mocks.verifyOtp.mockResolvedValue({ data: SESSION, error: null });
+  mocks.createClient.mockResolvedValue({
+    auth: {
+      exchangeCodeForSession: mocks.exchangeCodeForSession,
+      verifyOtp: mocks.verifyOtp,
+    },
+  });
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
 
 describe('GET /auth/callback', () => {
-  beforeEach(() => {
-    exchangeCodeForSession.mockReset();
-    delete process.env.NEXT_PUBLIC_SITE_URL;
+  it('exchanges a PKCE code and redirects to the validated next path', async () => {
+    const res = await GET(request('code=pkce-123&next=%2Freset-password'));
+
+    expect(mocks.exchangeCodeForSession).toHaveBeenCalledWith('pkce-123');
+    expect(mocks.verifyOtp).not.toHaveBeenCalled();
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/reset-password');
   });
 
-  afterEach(() => {
-    delete process.env.NEXT_PUBLIC_SITE_URL;
-  });
-
-  it('redirects to /dashboard when the code exchange succeeds and no next is given', async () => {
-    exchangeCodeForSession.mockResolvedValue({ error: null });
-
-    const response = await GET(request('?code=abc123'));
-
-    expect(exchangeCodeForSession).toHaveBeenCalledWith('abc123');
-    expect(location(response)).toBe('http://localhost:3000/dashboard');
-  });
-
-  it('redirects to a safe relative next on success', async () => {
-    exchangeCodeForSession.mockResolvedValue({ error: null });
-
-    const response = await GET(request('?code=abc123&next=%2Fjoin%2Fabc123'));
-
-    expect(location(response)).toBe('http://localhost:3000/join/abc123');
-  });
-
-  it('falls back to /dashboard for an absolute-URL next (open-redirect guard)', async () => {
-    exchangeCodeForSession.mockResolvedValue({ error: null });
-
-    const response = await GET(
-      request('?code=abc123&next=' + encodeURIComponent('https://evil.example.com'))
+  it('verifies a token_hash link through verifyOtp', async () => {
+    const res = await GET(
+      request('token_hash=th-1&type=recovery&next=%2Freset-password'),
     );
 
-    expect(location(response)).toBe('http://localhost:3000/dashboard');
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      type: 'recovery',
+      token_hash: 'th-1',
+    });
+    expect(mocks.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toBe('/reset-password');
   });
 
-  it('falls back to /dashboard for a protocol-relative next (open-redirect guard)', async () => {
-    exchangeCodeForSession.mockResolvedValue({ error: null });
+  it('defaults next to /dashboard when absent', async () => {
+    const res = await GET(request('code=abc'));
+    expect(res.headers.get('location')).toBe('/dashboard');
+  });
 
-    const response = await GET(
-      request('?code=abc123&next=' + encodeURIComponent('//evil.example.com'))
+  // `next` is attacker-controllable query input: the callback has just
+  // minted a session and must not hand the browser to another origin.
+  it('refuses an off-origin next and falls back to /dashboard', async () => {
+    for (const next of ['//evil.example', 'https://evil.example', '/\\x']) {
+      const res = await GET(request(`code=abc&next=${encodeURIComponent(next)}`));
+      expect(res.headers.get('location')).toBe('/dashboard');
+    }
+  });
+
+  it('sends a failed exchange to /login with a reason, not a 404 or a raw error', async () => {
+    mocks.exchangeCodeForSession.mockResolvedValue({
+      data: {},
+      error: { message: 'PKCE code verifier not found' },
+    });
+
+    const res = await GET(request('code=stale&next=%2Freset-password'));
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/login?error=link_invalid');
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it('reports a link Supabase already rejected as expired, without touching the client', async () => {
+    const res = await GET(
+      request(
+        'error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
+      ),
     );
 
-    expect(location(response)).toBe('http://localhost:3000/dashboard');
+    expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toBe('/login?error=link_expired');
   });
 
-  it('redirects to /login?error=confirmation_failed when the exchange fails', async () => {
-    exchangeCodeForSession.mockResolvedValue({
-      error: new Error('invalid or expired code'),
-    });
+  it('treats a bare visit with no credential as an invalid link', async () => {
+    const res = await GET(request('next=%2Fdashboard'));
 
-    const response = await GET(request('?code=stale-code'));
-
-    expect(location(response)).toBe(
-      'http://localhost:3000/login?error=confirmation_failed'
-    );
+    expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toBe('/login?error=link_invalid');
   });
 
-  it('redirects to /login when no code is present', async () => {
-    const response = await GET(request(''));
-
-    expect(exchangeCodeForSession).not.toHaveBeenCalled();
-    expect(location(response)).toBe('http://localhost:3000/login');
+  it('emits a relative Location so the redirect works behind a reverse proxy', async () => {
+    const res = await GET(request('code=abc&next=%2Fjoin%2Ftoken-1'));
+    expect(res.headers.get('location')).toBe('/join/token-1');
+    expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
-  // Without this the request-derived origin wins, and behind a proxy
-  // that doesn't forward Host it resolves to the address the server is
-  // bound to — reset links then point at https://0.0.0.0:3000.
-  describe('origin resolution', () => {
-    it('prefers the configured site URL over the request origin', async () => {
-      process.env.NEXT_PUBLIC_SITE_URL = 'https://crm.example.com';
-      exchangeCodeForSession.mockResolvedValue({ data: {}, error: null });
-
-      const response = await GET(request('?code=abc123&next=%2Freset-password'));
-
-      expect(location(response)).toBe('https://crm.example.com/reset-password');
-    });
-
-    it('strips a trailing slash from the configured site URL', async () => {
-      process.env.NEXT_PUBLIC_SITE_URL = 'https://crm.example.com/';
-      exchangeCodeForSession.mockResolvedValue({ data: {}, error: null });
-
-      const response = await GET(request('?code=abc123'));
-
-      expect(location(response)).toBe('https://crm.example.com/dashboard');
-    });
-
-    it('uses the configured site URL for the no-code and failed-exchange redirects too', async () => {
-      process.env.NEXT_PUBLIC_SITE_URL = 'https://crm.example.com';
-      exchangeCodeForSession.mockResolvedValue({ data: {}, error: new Error('nope') });
-
-      expect(location(await GET(request('')))).toBe('https://crm.example.com/login');
-      expect(location(await GET(request('?code=stale')))).toBe(
-        'https://crm.example.com/login?error=confirmation_failed'
-      );
-    });
-  });
-
+  // A reset link mints an ordinary session, so the lock cookie is what
+  // keeps it from being a one-click sign-in (see lib/auth/recovery).
   describe('password-recovery lock', () => {
     it('marks the session when next is /reset-password', async () => {
-      exchangeCodeForSession.mockResolvedValue({
-        data: { user: { updated_at: '2026-09-14T10:00:00Z' } },
-        error: null,
-      });
-
-      const response = await GET(request('?code=abc123&next=%2Freset-password'));
-      const cookie = response.cookies.get(RECOVERY_COOKIE);
+      const res = (await GET(
+        request('code=abc123&next=%2Freset-password'),
+      )) as NextResponse;
+      const cookie = res.cookies.get(RECOVERY_COOKIE);
 
       expect(cookie?.value).toBe('2026-09-14T10:00:00Z');
       expect(cookie?.httpOnly).toBe(true);
       expect(cookie?.path).toBe('/');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it('marks a type=recovery token_hash link that carries no next', async () => {
+      const res = (await GET(
+        request('token_hash=th-1&type=recovery'),
+      )) as NextResponse;
+
+      expect(res.cookies.get(RECOVERY_COOKIE)?.value).toBe(
+        '2026-09-14T10:00:00Z',
+      );
+      expect(res.headers.get('location')).toBe('/reset-password');
     });
 
     it('does not mark the session for other destinations', async () => {
-      exchangeCodeForSession.mockResolvedValue({
-        data: { user: { updated_at: '2026-09-14T10:00:00Z' } },
-        error: null,
-      });
+      const res = await GET(request('code=abc123&next=%2Fjoin%2Fabc123'));
 
-      const response = await GET(request('?code=abc123&next=%2Fjoin%2Fabc123'));
-
-      expect(response.cookies.get(RECOVERY_COOKIE)).toBeUndefined();
+      expect(res.headers.get('set-cookie')).toBeNull();
     });
 
     it('does not mark the session when the exchange fails', async () => {
-      exchangeCodeForSession.mockResolvedValue({
+      mocks.exchangeCodeForSession.mockResolvedValue({
         data: {},
-        error: new Error('invalid or expired code'),
+        error: { message: 'invalid or expired code' },
       });
 
-      const response = await GET(request('?code=stale&next=%2Freset-password'));
+      const res = await GET(request('code=stale&next=%2Freset-password'));
 
-      expect(response.cookies.get(RECOVERY_COOKIE)).toBeUndefined();
+      expect(res.headers.get('set-cookie')).toBeNull();
+    });
+
+    it('sets Secure when a proxy terminated TLS upstream', async () => {
+      const req = new Request(
+        'http://localhost:3000/auth/callback?code=abc&next=%2Freset-password',
+        { headers: { 'x-forwarded-proto': 'https' } },
+      );
+
+      const res = (await GET(req)) as NextResponse;
+
+      expect(res.cookies.get(RECOVERY_COOKIE)?.secure).toBe(true);
     });
   });
 });

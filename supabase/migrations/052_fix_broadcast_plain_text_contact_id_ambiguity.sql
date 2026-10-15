@@ -1,5 +1,5 @@
 -- ============================================================
--- 050_fix_broadcast_plain_text_contact_id_ambiguity.sql — carry
+-- 052_fix_broadcast_plain_text_contact_id_ambiguity.sql — carry
 --     migration 041's fix into the plain-text overload
 --
 -- The problem

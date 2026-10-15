@@ -32,8 +32,8 @@ function SignupPageInner() {
   // When the user lands here from `/join/<token>` we carry the
   // invite token in the query so it survives the signup → email
   // verification → redirect round-trip. `emailRedirectTo` below
-  // points back at /join/<token> so the user lands on the redeem
-  // step after verifying instead of being dropped on /dashboard.
+  // sends the verified user to /join/<token> so they land on the
+  // redeem step instead of being dropped on /dashboard.
   const inviteToken = searchParams.get("invite");
   const t = useTranslations("SignupPage");
 
@@ -62,16 +62,19 @@ function SignupPageInner() {
 
     setLoading(true);
 
-    // Always route the confirmation link through /auth/callback, which
-    // performs the actual PKCE code exchange before landing the user
-    // on `next` — see src/app/auth/callback/route.ts. Previously this
-    // was unset for the non-invite case (falling back to whatever
-    // "Site URL" the Supabase dashboard has, typically the bare
-    // origin with no code-exchange step at all) and pointed the
-    // invite case directly at /join/<token>, skipping the exchange.
+    // Always name our own origin as the place the confirmation link
+    // returns to. Previously this was left unset unless an invite was
+    // involved, so Supabase fell back to its Site URL — which on a
+    // freshly-created or self-hosted project is `http://localhost:3000`
+    // (issue #595) — and even when the Site URL was right the link
+    // landed on `/` with an unexchanged `?code=`, so the user had to
+    // sign in again after verifying. /auth/callback exchanges the link
+    // for a session and forwards to `next` (issue #592). Supabase still
+    // has to allow this origin under Authentication → URL Configuration
+    // → Redirect URLs; see docs/auth-emails.md.
     const next = inviteToken
       ? `/join/${encodeURIComponent(inviteToken)}`
-      : '/dashboard';
+      : "/dashboard";
     const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
     const { error } = await supabase.auth.signUp({

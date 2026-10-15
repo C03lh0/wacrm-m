@@ -24,6 +24,10 @@ const { resolveProviderForAccount } = vi.hoisted(() => ({
 vi.mock('@/lib/whatsapp/provider-factory', () => ({ resolveProviderForAccount }))
 
 const CONTACT = { id: 'contact-1', phone: '+15551234567' }
+// The send paths check conversation tenancy before the provider call
+// (conversation-scope.ts, GHSA-m4fx-g6pr-hrw8), so the stub has to own
+// the conversation these tests send into.
+const CONVERSATION = { id: 'conv-1' }
 
 function makeDb(): SupabaseClient {
   function builder(table: string) {
@@ -36,6 +40,7 @@ function makeDb(): SupabaseClient {
     b.single = () => Promise.resolve({ data: null, error: null })
     b.maybeSingle = () => {
       if (table === 'contacts') return Promise.resolve({ data: CONTACT, error: null })
+      if (table === 'conversations') return Promise.resolve({ data: CONVERSATION, error: null })
       return Promise.resolve({ data: null, error: null })
     }
     b.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null })

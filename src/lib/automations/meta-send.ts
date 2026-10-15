@@ -11,11 +11,15 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { resolveContactSendTarget } from '@/lib/whatsapp/wa-identity'
+import { assertConversationInAccount } from '@/lib/whatsapp/conversation-scope'
 import {
   resolveTemplateRow,
   templateContentText,
 } from '@/lib/whatsapp/template-body'
 import { supabaseAdmin } from './admin-client'
+import { getT } from '@/lib/i18n/translate'
+
+const t = getT('LibErrors')
 
 // ------------------------------------------------------------
 // Automation-side sender.
@@ -133,15 +137,19 @@ async function sendViaProvider(
     .eq('account_id', input.accountId)
     .maybeSingle()
   if (contactErr || !contact) {
-    throw new Error('contact not found for this account')
+    throw new Error(t('send.contactNotFound'))
   }
+
+  // Same for the conversation the message lands in — see
+  // conversation-scope.ts (GHSA-m4fx-g6pr-hrw8).
+  await assertConversationInAccount(db, input.conversationId, input.accountId)
 
   // Phone number, or the business-scoped user ID when Meta has never
   // given us a number for this customer (issue #519).
   const sendTarget = resolveContactSendTarget(contact)
   if (!sendTarget) {
     throw new Error(
-      `contact has no usable WhatsApp address (phone: ${contact.phone || 'none'})`
+      t('send.noWhatsAppAddress', { phone: contact.phone || t('send.none') })
     )
   }
   const sanitized = sendTarget.target
@@ -248,7 +256,7 @@ async function sendViaProvider(
   if (msgErr) {
     // The provider already has the message; record the DB error but
     // don't pretend the send failed. The engine wraps this in a log line.
-    throw new Error(`sent but DB insert failed: ${msgErr.message}`)
+    throw new Error(t('send.dbInsertFailed', { message: msgErr.message }))
   }
 
   await db
@@ -262,6 +270,7 @@ async function sendViaProvider(
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.conversationId)
+    .eq('account_id', input.accountId)
 
   return { whatsapp_message_id: waMessageId, provider: kind }
 }

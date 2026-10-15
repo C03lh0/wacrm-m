@@ -25,7 +25,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
 import { identityDisplayName, type WaIdentity } from './wa-identity'
 import { normalizePhone } from './phone-utils'
-import { runAutomationsForTrigger } from '@/lib/automations/engine'
+import { resumeAwaitingReply, runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
@@ -37,7 +37,7 @@ export interface ParsedInboundContent {
   contentText: string | null
   mediaUrl: string | null
   /**
-   * The attachment's MIME type (migration 047). Without it the download
+   * The attachment's MIME type (migration 049). Without it the download
    * path had to guess an extension from the fetched blob, which was only
    * possible after the bytes were already fetched.
    */
@@ -440,7 +440,7 @@ export async function resolveContactAndConversation(
  * contact/conversation and fan out to the Flow runner, automations,
  * AI auto-reply, and the message.received outbound webhook.
  * Idempotent — a repeat delivery of the same providerMessageId is
- * detected via migration 046's messages_dedup_key unique index and
+ * detected via migration 048's messages_dedup_key unique index and
  * skipped (dispatch is not re-run).
  */
 export async function ingestParsedMessage(
@@ -463,7 +463,7 @@ export async function ingestParsedMessage(
   // Idempotency check — lookup-then-insert-then-resolve-on-conflict,
   // the same house pattern as findOrCreateContact/findOrCreateConversation
   // above, keyed on the (provider, connection_id, provider_message_id)
-  // unique index from migration 046.
+  // unique index from migration 048.
   const { data: existingMessage, error: dedupLookupError } = await db
     .from('messages')
     .select('id')
@@ -524,7 +524,7 @@ export async function ingestParsedMessage(
 
   if (msgError) {
     // Lost a race — a concurrent delivery of the same event inserted
-    // first and the unique index (migration 046) rejected ours.
+    // first and the unique index (migration 048) rejected ours.
     // Re-resolve instead of dropping the event or double-counting it.
     if (isUniqueViolation(msgError)) {
       const { data: raced } = await db
@@ -588,6 +588,28 @@ export async function ingestParsedMessage(
   const flowConsumed = flowResult.consumed
 
   const inboundText = content.contentText ?? ''
+
+  // An automation parked at a "wait for reply" Send Buttons / Send List
+  // step takes this message as its reply — a tap or typed text — and
+  // continues from the step after the send. Like a Flow consuming the
+  // message, that suppresses the content-level triggers and the AI
+  // reply below so the customer doesn't get a second bot answering.
+  // Runs BEFORE the trigger dispatch so the message that parks a run
+  // can never also resume it. Flows still win: only checked when no
+  // flow consumed the message. Never throws.
+  const automationConsumed = flowConsumed
+    ? false
+    : await resumeAwaitingReply({
+        accountId,
+        contactId: contactRecord.id,
+        context: {
+          message_text: inboundText,
+          conversation_id: conversation.id,
+          interactive_reply_id: content.interactiveReplyId ?? undefined,
+        },
+      })
+  const contentConsumed = flowConsumed || automationConsumed
+
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
@@ -595,7 +617,7 @@ export async function ingestParsedMessage(
     | 'keyword_match'
     | 'interactive_reply'
   )[] = []
-  if (!flowConsumed) {
+  if (!contentConsumed) {
     automationTriggers.push('new_message_received', 'keyword_match')
     if (content.interactiveReplyId) {
       automationTriggers.push('interactive_reply')
@@ -616,7 +638,7 @@ export async function ingestParsedMessage(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
-  if (!flowConsumed && !content.interactiveReplyId && inboundText.trim()) {
+  if (!contentConsumed && !content.interactiveReplyId && inboundText.trim()) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,

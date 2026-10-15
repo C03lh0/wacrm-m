@@ -1,5 +1,5 @@
 -- ============================================================
--- 047_inbound_media_mirror
+-- 049_inbound_media_mirror
 --
 -- Issue #466. Inbound media is never persisted. The webhook verifies
 -- the Meta media id and stores a POINTER — `/api/whatsapp/media/<id>`
@@ -58,7 +58,7 @@ COMMENT ON COLUMN messages.media_type IS
   'INBOUND media only: an outbound media_url is a chat-media object whose '
   'path already carries the original filename and extension, so the type '
   'adds nothing there. Also NULL for text messages and for every row '
-  'written before migration 047.';
+  'written before migration 049.';
 
 -- ============================================================
 -- 2. whatsapp_config.mirror_inbound_media

@@ -21,10 +21,14 @@ const { dispatchInboundToFlows } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows }));
 
-const { runAutomationsForTrigger } = vi.hoisted(() => ({
+const { runAutomationsForTrigger, resumeAwaitingReply } = vi.hoisted(() => ({
   runAutomationsForTrigger: vi.fn(async () => {}),
+  resumeAwaitingReply: vi.fn(async () => false),
 }));
-vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger }));
+vi.mock('@/lib/automations/engine', () => ({
+  runAutomationsForTrigger,
+  resumeAwaitingReply,
+}));
 
 const { dispatchInboundToAiReply } = vi.hoisted(() => ({
   dispatchInboundToAiReply: vi.fn(async () => {}),
@@ -244,6 +248,55 @@ describe('ingestParsedMessage — idempotency', () => {
     expect(r2?.messageId).toBe('msg-2');
     expect(r1?.duplicate).toBe(false);
     expect(r2?.duplicate).toBe(false);
+  });
+});
+
+describe('ingestParsedMessage — automation waiting for a reply', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    resumeAwaitingReply.mockResolvedValue(false);
+    dispatchInboundToFlows.mockResolvedValue({ consumed: false });
+  });
+
+  const triggersFired = () =>
+    (runAutomationsForTrigger.mock.calls as unknown as [{ triggerType: string }][]).map(
+      ([args]) => args.triggerType,
+    );
+
+  it('offers the message to a waiting automation before any trigger fires', async () => {
+    const { db } = makeDb({ existingMessage: null, insertedMessageId: 'msg-1' });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    expect(resumeAwaitingReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({ message_text: 'hello' }),
+      }),
+    );
+    // Nothing was waiting, so the content triggers fire as normal.
+    expect(triggersFired()).toEqual(
+      expect.arrayContaining(['new_message_received', 'keyword_match']),
+    );
+  });
+
+  it('suppresses content triggers and AI reply when a waiting automation took it', async () => {
+    resumeAwaitingReply.mockResolvedValue(true);
+    const { db } = makeDb({ existingMessage: null, insertedMessageId: 'msg-1' });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    expect(triggersFired()).not.toContain('new_message_received');
+    expect(triggersFired()).not.toContain('keyword_match');
+    expect(dispatchInboundToAiReply).not.toHaveBeenCalled();
+  });
+
+  it('leaves the message to a flow that consumed it', async () => {
+    dispatchInboundToFlows.mockResolvedValue({ consumed: true });
+    const { db } = makeDb({ existingMessage: null, insertedMessageId: 'msg-1' });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    expect(resumeAwaitingReply).not.toHaveBeenCalled();
   });
 });
 

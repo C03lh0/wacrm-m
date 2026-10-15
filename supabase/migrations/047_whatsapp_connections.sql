@@ -1,5 +1,5 @@
 -- ============================================================
--- 045_whatsapp_connections
+-- 047_whatsapp_connections
 --
 -- Introduces a provider-agnostic `whatsapp_connections` table for
 -- Evolution API (and any future non-Meta provider), while leaving

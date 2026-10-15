@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Contact } from '@/types';
+import { fetchAllInChunks } from '@/lib/supabase/paged-query';
 
 // ============================================================
 // Broadcast template-variable resolution.
@@ -93,21 +94,27 @@ export async function fetchCustomValueIndex(
   const index: CustomValueIndex = new Map();
   if (contactIds.length === 0) return index;
 
-  // Supabase PostgREST caps the .in(...) IN-clause roughly at 1000
-  // values. Page through to stay safe.
-  const PAGE = 500;
-  for (let i = 0; i < contactIds.length; i += PAGE) {
-    const slice = contactIds.slice(i, i + PAGE);
-    const { data } = await db
+  // Two caps to clear, not one: PostgREST limits how many values an
+  // `.in(...)` list may carry AND how many rows a single response may
+  // return. fetchAllInChunks slices the id list and pages each slice's
+  // rows, so a wide audience with several custom fields each can't come
+  // back silently truncated (#608).
+  const rows = await fetchAllInChunks<
+    { contact_id: string; custom_field_id: string; value: string | null },
+    string
+  >(contactIds, (slice, from, to) =>
+    db
       .from('contact_custom_values')
       .select('contact_id, custom_field_id, value')
-      .in('contact_id', slice);
+      .in('contact_id', slice)
+      .order('id')
+      .range(from, to),
+  );
 
-    for (const row of data ?? []) {
-      const bucket = index.get(row.contact_id) ?? new Map<string, string>();
-      bucket.set(row.custom_field_id, row.value ?? '');
-      index.set(row.contact_id, bucket);
-    }
+  for (const row of rows) {
+    const bucket = index.get(row.contact_id) ?? new Map<string, string>();
+    bucket.set(row.custom_field_id, row.value ?? '');
+    index.set(row.contact_id, bucket);
   }
   return index;
 }

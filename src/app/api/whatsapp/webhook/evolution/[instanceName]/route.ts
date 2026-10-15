@@ -239,7 +239,7 @@ async function processEvolutionWebhookEvent(connection: any, body: EvolutionWebh
         .update({ last_inbound_at: new Date().toISOString() })
         .eq('id', connection.id)
       // Not fatal — the messages themselves are already stored. Logged
-      // rather than ignored because an unapplied migration 051 would
+      // rather than ignored because an unapplied migration 053 would
       // otherwise make this a no-op that looks exactly like success,
       // which is the failure mode this whole column exists to end.
       if (stampError) {

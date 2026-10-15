@@ -87,7 +87,7 @@ describe('createBroadcast — opt-out filtering (migration 039)', () => {
   });
 
   it('excludes an opted-out contact from the plan and counts it separately', async () => {
-    const db = makeDb(new Set(['contact-14155550123']));
+    const db = makeDb(new Set(['contact-+14155550123']));
 
     const plan = await createBroadcast(db, 'acct-1', 'user-1', {
       templateName: 'promo',
@@ -114,7 +114,7 @@ describe('createBroadcast — opt-out filtering (migration 039)', () => {
 
   it('throws bad_request with an opt-out-specific message when every recipient has opted out', async () => {
     const db = makeDb(
-      new Set(['contact-14155550123', 'contact-14155550124'])
+      new Set(['contact-+14155550123', 'contact-+14155550124'])
     );
 
     await expect(

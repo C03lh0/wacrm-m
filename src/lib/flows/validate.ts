@@ -25,6 +25,9 @@
 
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
 import type { ProviderName } from "@/lib/whatsapp/provider";
+import { getT } from "@/lib/i18n/translate";
+
+const t = getT("Validation.flows");
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -62,7 +65,7 @@ export function validateFlowForActivation(
       severity: "error",
       scope: "flow",
       field: "name",
-      message: "Flow name is required.",
+      message: t("nameRequired"),
     });
   }
 
@@ -75,7 +78,7 @@ export function validateFlowForActivation(
       severity: "error",
       scope: "flow",
       field: "entry_node_id",
-      message: "Pick an entry node before activating.",
+      message: t("entryRequired"),
     });
   }
 
@@ -84,7 +87,7 @@ export function validateFlowForActivation(
     issues.push({
       severity: "error",
       scope: "flow",
-      message: "A flow needs at least one node before activation.",
+      message: t("needsNode"),
     });
   }
 
@@ -93,7 +96,7 @@ export function validateFlowForActivation(
       severity: "error",
       scope: "flow",
       field: "entry_node_id",
-      message: `Entry node "${flow.entry_node_id}" doesn't exist.`,
+      message: t("entryMissing", { id: flow.entry_node_id }),
     });
   }
 
@@ -106,7 +109,7 @@ export function validateFlowForActivation(
         severity: "error",
         scope: "node",
         node_key: n.node_key,
-        message: `Duplicate node_key "${n.node_key}".`,
+        message: t("duplicateNodeKey", { key: n.node_key }),
       });
     }
     seen.add(n.node_key);
@@ -128,7 +131,7 @@ export function validateFlowForActivation(
           severity: "warning",
           scope: "node",
           node_key: n.node_key,
-          message: `Node "${n.node_key}" is unreachable from the entry node.`,
+          message: t("unreachable", { key: n.node_key }),
         });
       }
     }
@@ -156,7 +159,7 @@ function validateTrigger(
         severity: "error",
         scope: "trigger",
         field: "trigger_config.keywords",
-        message: "Keyword triggers need at least one keyword.",
+        message: t("keywordsRequired"),
       });
     } else {
       // Empty / whitespace-only keywords are silent no-ops at match
@@ -170,7 +173,7 @@ function validateTrigger(
           severity: "warning",
           scope: "trigger",
           field: "trigger_config.keywords",
-          message: `${blanks} keyword${blanks === 1 ? " is" : "s are"} blank — they won't match anything.`,
+          message: t("blankKeywords", { count: blanks }),
         });
       }
     }
@@ -200,7 +203,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: "Start node must point to a next node.",
+          message: t("startNeedsNext"),
         });
       } else if (!knownKeys.has(cfg.next_node_key)) {
         issues.push({
@@ -208,7 +211,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: `Start points to non-existent node "${cfg.next_node_key}".`,
+          message: t("startMissingNext", { key: cfg.next_node_key }),
         });
       }
       break;
@@ -222,7 +225,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "text",
-          message: "Send-message node needs a text body.",
+          message: t("sendMessageNeedsText"),
         });
       }
       if (!cfg.next_node_key) {
@@ -231,7 +234,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: "Send-message node must point to a next node.",
+          message: t("sendMessageNeedsNext"),
         });
       } else if (!knownKeys.has(cfg.next_node_key)) {
         issues.push({
@@ -239,7 +242,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: `Send-message points to non-existent node "${cfg.next_node_key}".`,
+          message: t("sendMessageMissingNext", { key: cfg.next_node_key }),
         });
       }
       break;
@@ -261,7 +264,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "media_type",
-          message: "Send-media node needs a media type (image, video, or document).",
+          message: t("sendMediaNeedsType"),
         });
       }
       if (!cfg.media_url?.trim()) {
@@ -270,7 +273,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "media_url",
-          message: "Send-media node needs a file (upload one before activating).",
+          message: t("sendMediaNeedsFile"),
         });
       }
       // Caption cap mirrors Meta's interactive body cap; documented as a
@@ -281,7 +284,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "caption",
-          message: `Caption exceeds ${INTERACTIVE_LIMITS.bodyMaxLength} chars (WhatsApp limit).`,
+          message: t("captionTooLong", { max: INTERACTIVE_LIMITS.bodyMaxLength }),
         });
       }
       if (!cfg.next_node_key) {
@@ -290,7 +293,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: "Send-media node must point to a next node.",
+          message: t("sendMediaNeedsNext"),
         });
       } else if (!knownKeys.has(cfg.next_node_key)) {
         issues.push({
@@ -298,7 +301,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: `Send-media points to non-existent node "${cfg.next_node_key}".`,
+          message: t("sendMediaMissingNext", { key: cfg.next_node_key }),
         });
       }
       break;
@@ -329,7 +332,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "text",
-          message: "Send-buttons node needs a text body.",
+          message: t("sendButtonsNeedsText"),
         });
       }
       const btns = cfg.buttons ?? [];
@@ -339,7 +342,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "buttons",
-          message: "Send-buttons needs at least one button.",
+          message: t("sendButtonsNeedsButton"),
         });
       }
       if (btns.length > INTERACTIVE_LIMITS.maxButtons) {
@@ -348,7 +351,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "buttons",
-          message: `WhatsApp allows at most ${INTERACTIVE_LIMITS.maxButtons} buttons per message.`,
+          message: t("tooManyButtons", { max: INTERACTIVE_LIMITS.maxButtons }),
         });
       }
       const seenIds = new Set<string>();
@@ -360,7 +363,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.reply_id`,
-            message: `Button ${i + 1} needs a reply id.`,
+            message: t("buttonNeedsReplyId", { n: i + 1 }),
           });
         } else if (seenIds.has(b.reply_id)) {
           issues.push({
@@ -368,7 +371,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.reply_id`,
-            message: `Duplicate button reply id "${b.reply_id}".`,
+            message: t("duplicateButtonReplyId", { id: b.reply_id }),
           });
         }
         if (b.reply_id) seenIds.add(b.reply_id);
@@ -379,7 +382,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.title`,
-            message: `Button ${i + 1} needs a title.`,
+            message: t("buttonNeedsTitle", { n: i + 1 }),
           });
         } else if (b.title.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
           issues.push({
@@ -387,7 +390,10 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.title`,
-            message: `Button ${i + 1} title is over ${INTERACTIVE_LIMITS.buttonTitleMaxLength} chars (WhatsApp limit).`,
+            message: t("buttonTitleTooLong", {
+              n: i + 1,
+              max: INTERACTIVE_LIMITS.buttonTitleMaxLength,
+            }),
           });
         }
 
@@ -397,7 +403,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.next_node_key`,
-            message: `Button ${i + 1} needs a next node.`,
+            message: t("buttonNeedsNext", { n: i + 1 }),
           });
         } else if (!knownKeys.has(b.next_node_key)) {
           issues.push({
@@ -405,7 +411,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: `${field}.next_node_key`,
-            message: `Button ${i + 1} points to non-existent node "${b.next_node_key}".`,
+            message: t("buttonMissingNext", { n: i + 1, key: b.next_node_key }),
           });
         }
       });
@@ -442,7 +448,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "text",
-          message: "Send-list node needs a text body.",
+          message: t("sendListNeedsText"),
         });
       }
       if (!cfg.button_label?.trim()) {
@@ -451,7 +457,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "button_label",
-          message: "Send-list needs a button label (the tap-to-expand text).",
+          message: t("sendListNeedsLabel"),
         });
       }
       const sections = cfg.sections ?? [];
@@ -465,7 +471,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "sections",
-          message: "Send-list needs at least one row.",
+          message: t("sendListNeedsRow"),
         });
       }
       if (totalRows > INTERACTIVE_LIMITS.maxListRowsTotal) {
@@ -474,7 +480,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "sections",
-          message: `Send-list allows at most ${INTERACTIVE_LIMITS.maxListRowsTotal} rows total across sections.`,
+          message: t("tooManyRows", { max: INTERACTIVE_LIMITS.maxListRowsTotal }),
         });
       }
       const seenIds = new Set<string>();
@@ -488,7 +494,7 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.reply_id`,
-              message: `Row ${ri + 1} in section ${si + 1} needs a reply id.`,
+              message: t("rowNeedsReplyId", { row: ri + 1, section: si + 1 }),
             });
           } else if (seenIds.has(row.reply_id)) {
             issues.push({
@@ -496,7 +502,7 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.reply_id`,
-              message: `Duplicate list row id "${row.reply_id}".`,
+              message: t("duplicateRowId", { id: row.reply_id }),
             });
           }
           if (row.reply_id) seenIds.add(row.reply_id);
@@ -507,7 +513,7 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.title`,
-              message: `Row ${ri + 1} needs a title.`,
+              message: t("rowNeedsTitle", { n: ri + 1 }),
             });
           } else if (
             row.title.length > INTERACTIVE_LIMITS.listRowTitleMaxLength
@@ -517,7 +523,10 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.title`,
-              message: `Row ${ri + 1} title exceeds ${INTERACTIVE_LIMITS.listRowTitleMaxLength} chars.`,
+              message: t("rowTitleTooLong", {
+                n: ri + 1,
+                max: INTERACTIVE_LIMITS.listRowTitleMaxLength,
+              }),
             });
           }
           if (
@@ -530,7 +539,10 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.description`,
-              message: `Row ${ri + 1} description exceeds ${INTERACTIVE_LIMITS.listRowDescriptionMaxLength} chars.`,
+              message: t("rowDescriptionTooLong", {
+                n: ri + 1,
+                max: INTERACTIVE_LIMITS.listRowDescriptionMaxLength,
+              }),
             });
           }
           if (!row.next_node_key) {
@@ -539,7 +551,7 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.next_node_key`,
-              message: `Row ${ri + 1} needs a next node.`,
+              message: t("rowNeedsNext", { n: ri + 1 }),
             });
           } else if (!knownKeys.has(row.next_node_key)) {
             issues.push({
@@ -547,7 +559,7 @@ function validateNode(
               scope: "node",
               node_key: node.node_key,
               field: `${field}.next_node_key`,
-              message: `Row ${ri + 1} points to non-existent node "${row.next_node_key}".`,
+              message: t("rowMissingNext", { n: ri + 1, key: row.next_node_key }),
             });
           }
         });
@@ -567,7 +579,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "prompt_text",
-          message: "Collect-input needs a prompt to send the customer.",
+          message: t("collectNeedsPrompt"),
         });
       }
       if (!cfg.var_key?.trim()) {
@@ -576,7 +588,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "var_key",
-          message: "Collect-input needs a var_key to store the answer under.",
+          message: t("collectNeedsVarKey"),
         });
       } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cfg.var_key)) {
         issues.push({
@@ -584,7 +596,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "var_key",
-          message: `var_key "${cfg.var_key}" must be alphanumeric+underscore and start with a letter or underscore.`,
+          message: t("invalidVarKey", { key: cfg.var_key }),
         });
       }
       if (!cfg.next_node_key) {
@@ -593,7 +605,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: "Collect-input must point to a next node.",
+          message: t("collectNeedsNext"),
         });
       } else if (!knownKeys.has(cfg.next_node_key)) {
         issues.push({
@@ -601,7 +613,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: `Collect-input points to non-existent node "${cfg.next_node_key}".`,
+          message: t("collectMissingNext", { key: cfg.next_node_key }),
         });
       }
       break;
@@ -622,7 +634,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "subject",
-          message: "Condition needs a subject (var / tag / contact_field).",
+          message: t("conditionNeedsSubject"),
         });
       }
       if (!cfg.subject_key?.trim()) {
@@ -631,7 +643,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "subject_key",
-          message: "Condition needs a subject_key (var name, tag id, or field name).",
+          message: t("conditionNeedsSubjectKey"),
         });
       }
       if (
@@ -643,7 +655,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "operator",
-          message: "Condition needs an operator.",
+          message: t("conditionNeedsOperator"),
         });
       } else if (
         (cfg.operator === "equals" || cfg.operator === "contains") &&
@@ -654,7 +666,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "value",
-          message: `Operator "${cfg.operator}" usually expects a comparison value — empty value will only match empty subjects.`,
+          message: t("operatorNeedsValue", { operator: cfg.operator }),
         });
       }
       for (const branch of ["true_next", "false_next"] as const) {
@@ -665,7 +677,9 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: branch,
-            message: `Condition needs a node for the "${branch === "true_next" ? "true" : "false"}" branch.`,
+            message: t("conditionNeedsBranch", {
+              branch: branch === "true_next" ? "true" : "false",
+            }),
           });
         } else if (!knownKeys.has(key)) {
           issues.push({
@@ -673,7 +687,7 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: branch,
-            message: `Condition's "${branch}" points to non-existent node "${key}".`,
+            message: t("conditionMissingBranch", { branch, key }),
           });
         }
       }
@@ -692,7 +706,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "mode",
-          message: "Set-tag needs a mode (add or remove).",
+          message: t("setTagNeedsMode"),
         });
       }
       if (!cfg.tag_id) {
@@ -701,7 +715,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "tag_id",
-          message: "Set-tag needs a tag to apply.",
+          message: t("setTagNeedsTag"),
         });
       }
       if (!cfg.next_node_key) {
@@ -710,7 +724,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: "Set-tag must point to a next node.",
+          message: t("setTagNeedsNext"),
         });
       } else if (!knownKeys.has(cfg.next_node_key)) {
         issues.push({
@@ -718,7 +732,7 @@ function validateNode(
           scope: "node",
           node_key: node.node_key,
           field: "next_node_key",
-          message: `Set-tag points to non-existent node "${cfg.next_node_key}".`,
+          message: t("setTagMissingNext", { key: cfg.next_node_key }),
         });
       }
       break;
@@ -735,7 +749,7 @@ function validateNode(
         severity: "error",
         scope: "node",
         node_key: node.node_key,
-        message: `Unknown node type "${node.node_type}".`,
+        message: t("unknownNodeType", { type: node.node_type }),
       });
   }
 

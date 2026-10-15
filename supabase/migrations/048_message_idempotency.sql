@@ -1,5 +1,5 @@
 -- ============================================================
--- 046_message_idempotency
+-- 048_message_idempotency
 --
 -- Adds a provider-aware idempotency key for messages so webhook
 -- retries (Meta's own retry behavior, and Evolution's) can no longer

@@ -12,7 +12,7 @@
 //                        retry), stamp each recipient row + the
 //                        aggregate counts, finalize status.
 //
-// Two send modes (`broadcasts.send_mode`, migration 049):
+// Two send modes (`broadcasts.send_mode`, migration 051):
 //   'template'   — Meta-only, requires an approved template
 //                  (`sendTemplate` on the resolved provider).
 //   'plain_text' — no template, just a body + {{1}}/{{2}} positional
@@ -35,6 +35,11 @@ import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
 import { SendMessageError } from '@/lib/whatsapp/send-message-error';
 import type { WhatsAppProviderClient, ProviderName } from '@/lib/whatsapp/provider';
 import {
+  // Raw integrator input is parsed strictly (a leading + is required,
+  // see #586); phones already stored on a contact go through the
+  // digit-normalizing pair instead, so a scheduled send doesn't drop
+  // recipients saved in national format.
+  parseInternationalPhone,
   sanitizePhoneForMeta,
   isValidE164,
   phoneVariants,
@@ -206,16 +211,20 @@ export async function createBroadcast(
 
   // Resolve each recipient to a contact. Invalid phones are dropped
   // (counted as rejected) rather than aborting the whole broadcast.
+  // `to` is raw integrator input, so the leading `+` is required — a
+  // national-format number would otherwise be delivered to whichever
+  // country its leading digits spell (issue #586).
   const resolved: { contactId: string; phone: string; params: string[] }[] = [];
   let rejected = 0;
   for (const r of recipients) {
-    const sanitized = sanitizePhoneForMeta(typeof r.to === 'string' ? r.to : '');
-    if (!isValidE164(sanitized)) {
+    const to = typeof r.to === 'string' ? r.to : '';
+    const sanitized = parseInternationalPhone(to);
+    if (!sanitized) {
       rejected++;
       continue;
     }
     const { id } = await findOrCreateContact(db, accountId, auditUserId, {
-      phone: sanitized,
+      phone: to,
     });
     resolved.push({
       contactId: id,
@@ -270,7 +279,7 @@ export async function createBroadcast(
       'bad_request',
       optedOut > 0 && rejected === 0
         ? 'All recipients have opted out of broadcasts'
-        : 'No recipients had a valid E.164 phone number',
+        : 'No recipients had a valid international phone number (leading + and country code, e.g. +14155550123)',
       400
     );
   }

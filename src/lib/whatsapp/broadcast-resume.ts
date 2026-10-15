@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { BroadcastError, type BroadcastPlan } from '@/lib/whatsapp/broadcast-core';
 import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
 import { SendMessageError } from '@/lib/whatsapp/send-message-error';
+import { chunk } from '@/lib/supabase/paged-query';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
@@ -158,14 +159,20 @@ export async function planBroadcastResume(
   }
 
   const statuses = scopeStatuses(scope);
-  const { data: rawRows, error: recError } = await db
+  const {
+    data: rawRows,
+    count: inScopeCount,
+    error: recError,
+  } = await db
     .from('broadcast_recipients')
-    .select('id, template_params, contact:contacts(phone)')
+    .select('id, template_params, contact:contacts(phone)', { count: 'exact' })
     .eq('broadcast_id', broadcastId)
     .in('status', statuses)
     // Oldest first, so repeated capped passes chew through the backlog
     // in a stable order instead of re-picking the same slice.
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .range(0, RESUME_MAX_PER_REQUEST - 1);
 
   if (recError) {
     console.error('[broadcast-resume] recipient load failed:', recError.message);
@@ -184,18 +191,19 @@ export async function planBroadcastResume(
     if (isValidE164(sanitized)) sendable.push(row);
     else unsendable.push(row.id);
   }
-  if (unsendable.length > 0) {
+  for (const ids of chunk(unsendable)) {
     await db
       .from('broadcast_recipients')
       .update({
         status: 'failed',
         error_message: 'No valid phone number on contact',
       })
-      .in('id', unsendable);
+      .in('id', ids);
   }
 
   const slice = sendable.slice(0, RESUME_MAX_PER_REQUEST);
-  const remaining = sendable.length - slice.length;
+  const unloaded = Math.max(0, (inScopeCount ?? rows.length) - rows.length);
+  const remaining = sendable.length - slice.length + unloaded;
 
   if (slice.length === 0) {
     throw new BroadcastError(

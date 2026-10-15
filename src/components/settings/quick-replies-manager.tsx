@@ -79,7 +79,7 @@ export function QuickRepliesManager() {
   const save = useCallback(async () => {
     if (!draft) return;
     if (!draft.title.trim()) {
-      toast.error(t("toastNameRequired"));
+      toast.error(t("nameRequired"));
       return;
     }
     const payload =
@@ -99,14 +99,14 @@ export function QuickRepliesManager() {
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(data.error ?? t("toastSaveFailed"));
+        toast.error(data.error ?? t("saveError"));
         return;
       }
-      toast.success(draft.id ? t("toastUpdated") : t("toastCreated"));
+      toast.success(draft.id ? t("updated") : t("created"));
       setDraft(null);
       await load();
     } catch {
-      toast.error(t("toastSaveFailed"));
+      toast.error(t("saveError"));
     } finally {
       setSaving(false);
     }
@@ -114,10 +114,10 @@ export function QuickRepliesManager() {
 
   const remove = useCallback(
     async (id: string) => {
-      if (!window.confirm(t("confirmDelete"))) return;
+      if (!window.confirm(t("deleteConfirm"))) return;
       const res = await fetch(`/api/quick-replies/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        toast.error(t("toastDeleteFailed"));
+        toast.error(t("deleteError"));
         return;
       }
       await load();
@@ -133,7 +133,7 @@ export function QuickRepliesManager() {
         action={
           <Button onClick={openCreate}>
             <Plus className="mr-1 h-4 w-4" />
-            {t("newButton")}
+            {t("new")}
           </Button>
         }
       />
@@ -144,7 +144,7 @@ export function QuickRepliesManager() {
         </div>
       ) : items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          {t("emptyState")}
+          {t("empty")}
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -187,28 +187,28 @@ export function QuickRepliesManager() {
       <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{draft?.id ? t("editTitle") : t("createTitle")}</DialogTitle>
+            <DialogTitle>{draft?.id ? t("edit") : t("new")}</DialogTitle>
           </DialogHeader>
           {draft && (
             <div className="max-h-[70vh] space-y-3 overflow-y-auto">
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">{t("fieldName")}</label>
+                <label className="mb-1 block text-xs text-muted-foreground">{t("nameLabel")}</label>
                 <Input
                   value={draft.title}
                   onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                  placeholder={t("placeholderName")}
+                  placeholder={t("namePlaceholder")}
                   className="bg-muted text-foreground"
                 />
               </div>
               <div className="flex gap-2">
                 <KindTab
                   active={draft.kind === "text"}
-                  label={t("fieldText")}
+                  label={t("kindText")}
                   onClick={() => setDraft({ ...draft, kind: "text" })}
                 />
                 <KindTab
                   active={draft.kind === "interactive"}
-                  label={t("fieldInteractive")}
+                  label={t("kindInteractive")}
                   onClick={() => setDraft({ ...draft, kind: "interactive" })}
                 />
               </div>
@@ -216,7 +216,7 @@ export function QuickRepliesManager() {
                 <Textarea
                   value={draft.content_text}
                   onChange={(e) => setDraft({ ...draft, content_text: e.target.value })}
-                  placeholder={t("placeholderText")}
+                  placeholder={t("textPlaceholder")}
                   className="min-h-28 bg-muted text-foreground"
                 />
               ) : (
