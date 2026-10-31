@@ -56,3 +56,6 @@ next-env.d.ts
 
 # scripts
 /scripts/
+
+# supabase
+supabase/.temp/

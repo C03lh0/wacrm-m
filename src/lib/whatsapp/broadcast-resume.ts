@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { BroadcastError, type BroadcastPlan } from '@/lib/whatsapp/broadcast-core';
 import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
 import { SendMessageError } from '@/lib/whatsapp/send-message-error';
+import { DELIVERY_LOCK_STALE_MS } from '@/lib/whatsapp/broadcast-delivery-lease';
 import { chunk } from '@/lib/supabase/paged-query';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
@@ -45,13 +46,7 @@ export const RESUME_SCOPES: readonly ResumeScope[] = [
  */
 export const RESUME_MAX_PER_REQUEST = 1000;
 
-/**
- * How long a `delivery_locked_at` stamp is honoured before it is read
- * as abandoned. Long enough that a legitimately slow pass is never
- * stolen from, short enough that a crashed one doesn't wedge the
- * campaign until someone touches the database.
- */
-export const DELIVERY_LOCK_STALE_MS = 30 * 60 * 1000;
+export const RESUME_MAX_SCAN_PAGES = 25;
 
 function scopeStatuses(scope: ResumeScope): string[] {
   if (scope === 'pending') return ['pending'];
@@ -79,10 +74,12 @@ export async function claimBroadcastDelivery(
 
   const { data, error } = await db
     .from('broadcasts')
-    .update({ delivery_locked_at: now.toISOString() })
+    .update({ delivery_locked_at: now.toISOString(), delivery_lease_until: null })
     .eq('id', broadcastId)
     .eq('account_id', accountId)
-    .or(`delivery_locked_at.is.null,delivery_locked_at.lt.${staleCutoff}`)
+    .or(
+      `and(or(delivery_locked_at.is.null,delivery_locked_at.lt.${staleCutoff}),or(delivery_lease_until.is.null,delivery_lease_until.lt.${now.toISOString()}))`
+    )
     .select('id');
 
   if (error) {
@@ -159,38 +156,53 @@ export async function planBroadcastResume(
   }
 
   const statuses = scopeStatuses(scope);
-  const {
-    data: rawRows,
-    count: inScopeCount,
-    error: recError,
-  } = await db
-    .from('broadcast_recipients')
-    .select('id, template_params, contact:contacts(phone)', { count: 'exact' })
-    .eq('broadcast_id', broadcastId)
-    .in('status', statuses)
-    // Oldest first, so repeated capped passes chew through the backlog
-    // in a stable order instead of re-picking the same slice.
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-    .range(0, RESUME_MAX_PER_REQUEST - 1);
-
-  if (recError) {
-    console.error('[broadcast-resume] recipient load failed:', recError.message);
-    throw new BroadcastError('internal', 'Failed to load recipients', 500);
-  }
-
-  const rows = (rawRows ?? []) as RecipientRow[];
-
-  // A recipient whose contact has no usable phone can never send. Stamp
-  // it failed now: leaving it 'pending' would keep the broadcast in
-  // 'sending' forever, which is the very symptom being fixed.
   const sendable: RecipientRow[] = [];
   const unsendable: string[] = [];
-  for (const row of rows) {
-    const sanitized = sanitizePhoneForMeta(contactPhone(row) ?? '');
-    if (isValidE164(sanitized)) sendable.push(row);
-    else unsendable.push(row.id);
+  let inScopeCount: number | null = null;
+  let scanned = 0;
+
+  for (
+    let page = 0;
+    page < RESUME_MAX_SCAN_PAGES && sendable.length < RESUME_MAX_PER_REQUEST;
+    page++
+  ) {
+    const from = page * RESUME_MAX_PER_REQUEST;
+    const {
+      data: rawRows,
+      count,
+      error: recError,
+    } = await db
+      .from('broadcast_recipients')
+      .select('id, template_params, contact:contacts(phone)', { count: 'exact' })
+      .eq('broadcast_id', broadcastId)
+      .in('status', statuses)
+      // Oldest first, so repeated capped passes chew through the backlog
+      // in a stable order instead of re-picking the same slice.
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + RESUME_MAX_PER_REQUEST - 1);
+
+    if (recError) {
+      console.error('[broadcast-resume] recipient load failed:', recError.message);
+      throw new BroadcastError('internal', 'Failed to load recipients', 500);
+    }
+
+    const rows = (rawRows ?? []) as RecipientRow[];
+    if (page === 0) inScopeCount = count ?? null;
+    scanned += rows.length;
+
+    // A recipient whose contact has no usable phone can never send. Stamp
+    // it failed now: leaving it 'pending' would keep the broadcast in
+    // 'sending' forever, which is the very symptom being fixed.
+    for (const row of rows) {
+      const sanitized = sanitizePhoneForMeta(contactPhone(row) ?? '');
+      if (isValidE164(sanitized)) sendable.push(row);
+      else unsendable.push(row.id);
+    }
+
+    if (rows.length < RESUME_MAX_PER_REQUEST) break;
   }
+
   for (const ids of chunk(unsendable)) {
     await db
       .from('broadcast_recipients')
@@ -202,10 +214,10 @@ export async function planBroadcastResume(
   }
 
   const slice = sendable.slice(0, RESUME_MAX_PER_REQUEST);
-  const unloaded = Math.max(0, (inScopeCount ?? rows.length) - rows.length);
+  const unloaded = Math.max(0, (inScopeCount ?? scanned) - scanned);
   const remaining = sendable.length - slice.length + unloaded;
 
-  if (slice.length === 0) {
+  if (slice.length === 0 && remaining === 0) {
     throw new BroadcastError(
       'nothing_to_resume',
       scope === 'failed'

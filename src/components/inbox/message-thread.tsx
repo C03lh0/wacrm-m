@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePresence } from "@/hooks/use-presence";
@@ -52,9 +52,27 @@ import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
-import { renderTemplateBody } from "@/lib/whatsapp/template-body";
+import {
+  renderTemplateBody,
+  templateHeaderMediaUrl,
+} from "@/lib/whatsapp/template-body";
+import {
+  matchMessageTemplate,
+  templateNamesInMessages,
+} from "@/lib/whatsapp/template-message-view";
 import { contactHandle } from "@/lib/whatsapp/wa-identity";
+import { resolveAssignmentResult } from "@/lib/inbox/assignment";
+import {
+  businessReactionOn,
+  withBusinessReaction,
+} from "@/lib/inbox/business-reaction";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  confirmedSendUpdate,
+  isTempMessage,
+  newTempMessageId,
+} from "@/lib/inbox/optimistic-messages";
 
 interface ReplyDraft {
   id: string;
@@ -66,17 +84,8 @@ interface MessageThreadProps {
   conversation: Conversation | null;
   contact: Contact | null;
   messages: Message[];
-  /**
-   * Hands a freshly fetched page of messages to the parent. The
-   * conversation id is passed explicitly rather than read off the first
-   * row, because an empty page still has to identify which thread it
-   * belongs to — the parent merges by conversation and would otherwise
-   * have no way to tell "no messages in this thread" from "no answer".
-   *
-   * Used for both the initial page and each older page, so the parent's
-   * merge has to be order-independent.
-   */
   onMessagesLoaded: (messages: Message[], conversationId: string) => void;
+  onOlderMessagesLoaded?: (messages: Message[]) => void;
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
@@ -190,6 +199,7 @@ export function MessageThread({
   contact,
   messages,
   onMessagesLoaded,
+  onOlderMessagesLoaded,
   onNewMessage,
   onUpdateMessage,
   onStatusChange,
@@ -208,19 +218,51 @@ export function MessageThread({
   const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
-  // Whether there is (probably) another page behind the oldest message
-  // in memory, and whether that page is in flight. Both reset per
-  // conversation by the fetch effect below.
-  const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  // Scroll height captured just before an older page is prepended.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Scroll geometry captured just before an older page is prepended.
   // Non-null tells the auto-scroll effect to hold the reading position
   // instead of jumping to the bottom.
-  const pendingPrependHeightRef = useRef<number | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  // Whether there is (probably) another page behind the oldest message
+  // in memory, per conversation, and whether that page is in flight.
+  const [olderPages, setOlderPages] = useState<{
+    conversationId: string;
+    hasOlder: boolean;
+  } | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profilesVersion, setProfilesVersion] = useState(0);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
+  const [sentTemplates, setSentTemplates] = useState<MessageTemplate[]>([]);
+  const sentTemplateNames = useMemo(
+    () => templateNamesInMessages(messages).join("\n"),
+    [messages],
+  );
+  useEffect(() => {
+    if (!sentTemplateNames) return;
+
+    const supabase = createClient();
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("message_templates")
+        .select("*")
+        .in("name", sentTemplateNames.split("\n"));
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch sent templates:", error);
+        return;
+      }
+      setSentTemplates((data as MessageTemplate[]) ?? []);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sentTemplateNames]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
   // parent's resyncToken); the 700ms spin is just feedback so the click
@@ -275,7 +317,7 @@ export function MessageThread({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [profilesVersion]);
 
   // 24-hour session timer — Meta Cloud API's customer-service-window
   // rule only, see MessageThreadProps.sessionWindowApplies.
@@ -320,6 +362,8 @@ export function MessageThread({
 
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
+  const hasOlderMessages =
+    !!olderPages && olderPages.conversationId === conversationId && olderPages.hasOlder;
 
   const mediaMessageId =
     openMedia && openMedia.conversationId === conversationId
@@ -354,6 +398,7 @@ export function MessageThread({
         .select("*")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(MESSAGE_PAGE_SIZE);
 
       if (cancelled) return;
@@ -361,12 +406,12 @@ export function MessageThread({
       if (error) {
         console.error("Failed to fetch messages:", error);
       } else {
-        const page = data ?? [];
-        // A full page means there is probably more behind it. A short
-        // page is proof there isn't.
-        setHasMoreOlder(page.length === MESSAGE_PAGE_SIZE);
-        // Newest-first off the wire, oldest-first for rendering.
-        onMessagesLoadedRef.current([...page].reverse(), conversationId);
+        const newestPage = ((data ?? []) as Message[]).slice().reverse();
+        setOlderPages({
+          conversationId,
+          hasOlder: newestPage.length === MESSAGE_PAGE_SIZE,
+        });
+        onMessagesLoadedRef.current(newestPage, conversationId);
       }
 
       if (!cancelled) setLoading(false);
@@ -382,53 +427,48 @@ export function MessageThread({
   }, [conversationId, resyncToken]);
 
   /**
-   * Pull the page of messages immediately older than the oldest one in
-   * memory. Keyed on `created_at` rather than an offset because the
-   * thread grows at the other end while the user reads: an offset would
-   * skip or repeat rows every time a new message arrives mid-scroll.
+   * Pull the page immediately older than the oldest message in memory.
+   * Keyed on (created_at, id) rather than an offset because the thread
+   * grows at the other end while the user reads: an offset would skip or
+   * repeat rows every time a new message arrives mid-scroll, and
+   * created_at alone ties within a webhook batch.
    */
   const loadOlderMessages = useCallback(async () => {
-    if (!conversationId || loadingOlder || !hasMoreOlder) return;
-
-    const oldest = messages.find((m) => !m.id.startsWith("temp-"));
-    if (!oldest) return;
-
+    const oldest = messages.find((m) => !isTempMessage(m));
+    if (!conversationId || !oldest || loadingOlder) return;
     setLoadingOlder(true);
-
     try {
-      const supabase = createClient();
-      const { data, error } = await supabase
+      const { data, error } = await createClient()
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
-        .lt("created_at", oldest.created_at)
+        .lte("created_at", oldest.created_at)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(MESSAGE_PAGE_SIZE);
-
       if (error) {
         console.error("Failed to fetch older messages:", error);
         toast.error(t("loadOlderFailed"));
         return;
       }
-
-      const page = data ?? [];
-      setHasMoreOlder(page.length === MESSAGE_PAGE_SIZE);
-      if (page.length === 0) return;
-
-      // Captured here rather than before the fetch. The auto-scroll
-      // effect fires on any `messages` change, so a realtime message
-      // landing mid-fetch would otherwise consume this value and leave
-      // the prepend itself to scroll the user back to the bottom. Set
-      // immediately before the state update, the window is one render.
-      pendingPrependHeightRef.current = scrollRef.current?.scrollHeight ?? null;
-
-      // The parent merges by id, so handing it an older page is the same
-      // operation as handing it the newest one.
-      onMessagesLoadedRef.current([...page].reverse(), conversationId);
+      const olderPage = ((data ?? []) as Message[]).slice().reverse();
+      setOlderPages({
+        conversationId,
+        hasOlder: olderPage.length === MESSAGE_PAGE_SIZE,
+      });
+      const knownIds = new Set(messages.map((m) => m.id));
+      const el = scrollRef.current;
+      if (el && olderPage.some((m) => !knownIds.has(m.id))) {
+        scrollAnchorRef.current = {
+          scrollHeight: el.scrollHeight,
+          scrollTop: el.scrollTop,
+        };
+      }
+      onOlderMessagesLoaded?.(olderPage);
     } finally {
       setLoadingOlder(false);
     }
-  }, [conversationId, loadingOlder, hasMoreOlder, messages, t]);
+  }, [conversationId, loadingOlder, messages, onOlderMessagesLoaded, t]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
@@ -562,20 +602,17 @@ export function MessageThread({
 
   // Auto-scroll to bottom on new messages — except right after an older
   // page was prepended, where jumping to the bottom would throw the user
-  // back out of the history they just asked for. In that case the
-  // content above the viewport grew by a known amount, so adding that
-  // delta to scrollTop leaves the same rows under the cursor.
-  useEffect(() => {
+  // back out of the history they just asked for. The anchor records the
+  // pre-prepend geometry so the same rows stay under the cursor.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-
-    const heightBeforePrepend = pendingPrependHeightRef.current;
-    if (heightBeforePrepend !== null) {
-      pendingPrependHeightRef.current = null;
-      el.scrollTop += el.scrollHeight - heightBeforePrepend;
+    const anchor = scrollAnchorRef.current;
+    scrollAnchorRef.current = null;
+    if (anchor) {
+      el.scrollTop = el.scrollHeight - anchor.scrollHeight + anchor.scrollTop;
       return;
     }
-
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
@@ -583,7 +620,7 @@ export function MessageThread({
     async (text: string, replyToId?: string) => {
       if (!conversation) return;
 
-      const tempId = `temp-${Date.now()}`;
+      const tempId = newTempMessageId();
 
       // Optimistic update — shows the message immediately with "sending" status
       const optimisticMsg: Message = {
@@ -625,7 +662,7 @@ export function MessageThread({
         // Success — the realtime INSERT event will replace the temp bubble
         // with the real DB row. If realtime hasn't arrived yet, at least
         // flip status to 'sent' so the UI stops showing "sending".
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, confirmedSendUpdate(payload));
       } catch (err) {
         console.error("Failed to send message:", err);
         const reason = err instanceof Error ? err.message : t("networkError");
@@ -648,7 +685,7 @@ export function MessageThread({
           ? payload.caption || payload.filename || t("documentFallback")
           : payload.caption;
 
-      const tempId = `temp-${Date.now()}`;
+      const tempId = newTempMessageId();
       const optimisticMsg: Message = {
         id: tempId,
         conversation_id: conversation.id,
@@ -690,7 +727,7 @@ export function MessageThread({
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, confirmedSendUpdate(data));
       } catch (err) {
         console.error("Failed to send media:", err);
         const reason = err instanceof Error ? err.message : t("networkError");
@@ -706,7 +743,7 @@ export function MessageThread({
     async (payload: InteractiveMessagePayload, replyToId?: string) => {
       if (!conversation) return;
 
-      const tempId = `temp-${Date.now()}`;
+      const tempId = newTempMessageId();
       // Optimistic bubble — renders the buttons/list immediately via the
       // interactive_payload, same as the persisted row will.
       const optimisticMsg: Message = {
@@ -744,7 +781,7 @@ export function MessageThread({
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, confirmedSendUpdate(data));
       } catch (err) {
         console.error("Failed to send interactive message:", err);
         const reason = err instanceof Error ? err.message : t("networkError");
@@ -786,7 +823,7 @@ export function MessageThread({
       if (!conversation) return;
 
       const renderedBody = renderTemplateBody(template.body_text, values.body);
-      const tempId = `temp-${Date.now()}`;
+      const tempId = newTempMessageId();
 
       const optimisticMsg: Message = {
         id: tempId,
@@ -794,6 +831,7 @@ export function MessageThread({
         sender_type: "agent",
         content_type: "template",
         content_text: renderedBody,
+        media_url: templateHeaderMediaUrl(template) ?? undefined,
         template_name: template.name,
         status: "sending",
         created_at: new Date().toISOString(),
@@ -833,7 +871,7 @@ export function MessageThread({
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        onUpdateMessage(tempId, confirmedSendUpdate(payload));
       } catch (err) {
         console.error("Failed to send template:", err);
         const reason = err instanceof Error ? err.message : t("networkError");
@@ -915,26 +953,13 @@ export function MessageThread({
       // stale closure. Snapshot stored for rollback on POST failure.
       setReactions((prev) => {
         snapshot = prev;
-        const own = prev.find(
-          (r) =>
-            r.message_id === messageId &&
-            r.actor_type === "agent" &&
-            r.actor_id === userId,
-        );
-        if (emoji === "") return own ? prev.filter((r) => r !== own) : prev;
-        if (own) return prev.map((r) => (r === own ? { ...own, emoji } : r));
-        return [
-          ...prev,
-          {
-            id: `temp-${Date.now()}`,
-            message_id: messageId,
-            conversation_id: convId,
-            actor_type: "agent",
-            actor_id: userId,
-            emoji,
-            created_at: new Date().toISOString(),
-          },
-        ];
+        return withBusinessReaction(prev, {
+          messageId,
+          conversationId: convId,
+          userId,
+          emoji,
+          now: new Date(),
+        });
       });
 
       try {
@@ -961,10 +986,12 @@ export function MessageThread({
       if (!conversation) return;
 
       const supabase = createClient();
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("conversations")
         .update({ assigned_agent_id: agentId })
-        .eq("id", conversation.id);
+        .eq("id", conversation.id)
+        .select("assigned_agent_id")
+        .single();
 
       if (error) {
         console.error("Failed to update assignment:", error);
@@ -972,7 +999,16 @@ export function MessageThread({
         return;
       }
 
-      onAssignChange(conversation.id, agentId);
+      const { assignedAgentId, rejected } = resolveAssignmentResult(
+        agentId,
+        data?.assigned_agent_id,
+      );
+      if (rejected) {
+        toast.error(t("assigneeNoLongerMember"));
+        setProfilesVersion((v) => v + 1);
+      }
+
+      onAssignChange(conversation.id, assignedAgentId);
     },
     [conversation, onAssignChange, t],
   );
@@ -1216,16 +1252,16 @@ export function MessageThread({
           </div>
         ) : (
           <div className="space-y-4">
-            {hasMoreOlder && (
-              <div className="flex justify-center pb-2">
-                <button
-                  type="button"
-                  onClick={loadOlderMessages}
+            {hasOlderMessages && onOlderMessagesLoaded && (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadOlderMessages()}
                   disabled={loadingOlder}
-                  className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loadingOlder ? t("loadingOlder") : t("loadOlder")}
-                </button>
+                </Button>
               </div>
             )}
             {messageGroups.map((group) => (
@@ -1252,15 +1288,10 @@ export function MessageThread({
                         }
                       : null;
                     const msgReactions = reactionsByMessageId.get(msg.id);
-                    // Toggle is computed at the call site — `msgReactions`
-                    // and `user?.id` are already in scope, no extra hook.
+                    // Toggle is computed at the call site — no extra hook.
                     const handlePillToggle = (emoji: string) => {
-                      const own = msgReactions?.find(
-                        (r) =>
-                          r.actor_type === "agent" &&
-                          r.actor_id === user?.id,
-                      );
-                      const next = own?.emoji === emoji ? "" : emoji;
+                      const current = businessReactionOn(msgReactions, msg.id);
+                      const next = current?.emoji === emoji ? "" : emoji;
                       void postReaction(msg.id, next);
                     };
                     return (
@@ -1274,9 +1305,13 @@ export function MessageThread({
                       >
                         <MessageBubble
                           message={msg}
+                          template={
+                            msg.content_type === "template"
+                              ? matchMessageTemplate(msg, sentTemplates)
+                              : null
+                          }
                           reply={reply}
                           reactions={msgReactions}
-                          currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
                           onOpenMedia={handleMediaChange}
                         />

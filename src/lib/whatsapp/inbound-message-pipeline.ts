@@ -23,6 +23,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
+import { claimFirstInboundMessage } from '@/lib/conversations/first-inbound'
 import { identityDisplayName, type WaIdentity } from './wa-identity'
 import { normalizePhone } from './phone-utils'
 import { resumeAwaitingReply, runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -37,7 +38,7 @@ export interface ParsedInboundContent {
   contentText: string | null
   mediaUrl: string | null
   /**
-   * The attachment's MIME type (migration 049). Without it the download
+   * The attachment's MIME type (migration 039). Without it the download
    * path had to guess an extension from the fetched blob, which was only
    * possible after the bytes were already fetched.
    */
@@ -440,7 +441,7 @@ export async function resolveContactAndConversation(
  * contact/conversation and fan out to the Flow runner, automations,
  * AI auto-reply, and the message.received outbound webhook.
  * Idempotent — a repeat delivery of the same providerMessageId is
- * detected via migration 048's messages_dedup_key unique index and
+ * detected via migration 903's messages_dedup_key unique index and
  * skipped (dispatch is not re-run).
  */
 export async function ingestParsedMessage(
@@ -463,7 +464,7 @@ export async function ingestParsedMessage(
   // Idempotency check — lookup-then-insert-then-resolve-on-conflict,
   // the same house pattern as findOrCreateContact/findOrCreateConversation
   // above, keyed on the (provider, connection_id, provider_message_id)
-  // unique index from migration 048.
+  // unique index from migration 903.
   const { data: existingMessage, error: dedupLookupError } = await db
     .from('messages')
     .select('id')
@@ -494,13 +495,6 @@ export async function ingestParsedMessage(
     }
   }
 
-  const { count: priorCustomerMsgCount } = await db
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('conversation_id', conversation.id)
-    .eq('sender_type', 'customer')
-  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
-
   const { data: insertedMessage, error: msgError } = await db
     .from('messages')
     .insert({
@@ -524,7 +518,7 @@ export async function ingestParsedMessage(
 
   if (msgError) {
     // Lost a race — a concurrent delivery of the same event inserted
-    // first and the unique index (migration 048) rejected ours.
+    // first and the unique index (migration 903) rejected ours.
     // Re-resolve instead of dropping the event or double-counting it.
     if (isUniqueViolation(msgError)) {
       const { data: raced } = await db
@@ -544,6 +538,17 @@ export async function ingestParsedMessage(
     console.error('[inbound-pipeline] error inserting message:', msgError)
     return null
   }
+
+  // Claimed, not counted, and only once the insert above actually won:
+  // an atomic conditional UPDATE on `first_inbound_at` means that of two
+  // concurrent first deliveries exactly one sees `true`, so
+  // `first_inbound_message` fires once. Counting prior customer rows —
+  // what this did before — let both deliveries read zero and both fire.
+  const isFirstInboundMessage = await claimFirstInboundMessage(
+    db,
+    conversation,
+    createdAt.toISOString()
+  )
 
   // The unread bump is done DB-side (migration 037's
   // bump_conversation_on_inbound) rather than as a read-modify-write of

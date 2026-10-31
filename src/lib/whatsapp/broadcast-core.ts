@@ -12,7 +12,7 @@
 //                        retry), stamp each recipient row + the
 //                        aggregate counts, finalize status.
 //
-// Two send modes (`broadcasts.send_mode`, migration 051):
+// Two send modes (`broadcasts.send_mode`, migration 905):
 //   'template'   — Meta-only, requires an approved template
 //                  (`sendTemplate` on the resolved provider).
 //   'plain_text' — no template, just a body + {{1}}/{{2}} positional
@@ -106,8 +106,12 @@ export interface BroadcastPlan {
   planned: PlannedRecipient[];
   /** Phones rejected up front (invalid E.164) — counted as failed. */
   rejected: number;
-  /** Contacts excluded because they opted out of broadcasts (migration 039). */
+  /** Contacts excluded because they opted out of broadcasts (migration 901). */
   optedOut: number;
+}
+
+export interface CreatedBroadcastPlan extends BroadcastPlan {
+  duplicates: number;
 }
 
 const MAX_RECIPIENTS = 1000;
@@ -123,7 +127,7 @@ export async function createBroadcast(
   accountId: string,
   auditUserId: string,
   params: CreateBroadcastParams
-): Promise<BroadcastPlan> {
+): Promise<CreatedBroadcastPlan> {
   const { name, templateName, recipients } = params;
   const sendMode = params.sendMode ?? 'template';
   const bodyText = params.bodyText?.trim() || null;
@@ -235,7 +239,7 @@ export async function createBroadcast(
     });
   }
 
-  // Exclude contacts who've opted out of broadcasts (migration 039).
+  // Exclude contacts who've opted out of broadcasts (migration 901).
   // Neither Meta's template-approval process nor Evolution's lack
   // thereof enforces consent — this is the CRM's own backstop, and
   // it's checked here regardless of which provider the send will use.
@@ -346,6 +350,7 @@ export async function createBroadcast(
     planned,
     rejected,
     optedOut,
+    duplicates: resolved.length - deduped.length,
   };
 }
 

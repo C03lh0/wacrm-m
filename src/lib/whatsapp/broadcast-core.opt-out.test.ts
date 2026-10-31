@@ -69,7 +69,7 @@ function makeDb(optedOutContactIds: Set<string>): SupabaseClient {
   } as unknown as SupabaseClient;
 }
 
-describe('createBroadcast — opt-out filtering (migration 039)', () => {
+describe('createBroadcast — opt-out filtering (migration 901)', () => {
   beforeEach(() => {
     resolveProviderForAccount.mockReset();
     resolveProviderForAccount.mockResolvedValue({

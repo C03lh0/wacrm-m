@@ -16,6 +16,18 @@ const { resolveProviderForAccount } = vi.hoisted(() => ({
 }));
 vi.mock('./provider-factory', () => ({ resolveProviderForAccount }));
 
+// After persisting, the send path drains any status webhook that arrived
+// before the outbound row existed. It builds its own service-role client,
+// which has no env here — and this suite is about provider capability
+// gating, not status replay.
+const { applyPendingMessageStatuses } = vi.hoisted(() => ({
+  applyPendingMessageStatuses: vi.fn(async () => {}),
+}));
+vi.mock('./message-status-sync', () => ({ applyPendingMessageStatuses }));
+vi.mock('@/lib/flows/admin-client', () => ({
+  supabaseAdmin: () => ({}) as unknown as SupabaseClient,
+}));
+
 const CONTACT = { id: 'contact-1', phone: '+15551234567' };
 const CONVERSATION = { id: 'conv-1', account_id: 'acct-1', contact: CONTACT };
 

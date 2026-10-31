@@ -55,32 +55,59 @@ BEGIN
   -- first call — plpgsql resolves names at execution, not CREATE, so a
   -- plain replay can't catch it).
   --
-  -- The signature asserted here is the 10-argument plain-text overload,
-  -- not 041's 8-argument one: migration 051 DROPs the 8-argument
-  -- function outright and replaces it, so on this branch the overload
-  -- below is the only one that exists and the only one the app calls.
-  -- 052 is what carries 041's qualified RETURNING into it — without
-  -- that migration this assertion fails, which is the point.
+  -- Both of 041's descendants are asserted, because this branch keeps
+  -- two: upstream's 8-argument JSONB function, and the fork's
+  -- 10-argument plain-text overload (905/906, re-cut as JSONB by 908).
+  -- Each must carry 041's qualified RETURNING.
   IF pg_get_functiondef(
-       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[],text,text)'::regprocedure
+       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb)'::regprocedure
      ) NOT LIKE '%RETURNING id, broadcast_recipients.contact_id%' THEN
     RAISE EXCEPTION
-      'create_broadcast_with_recipients still has the ambiguous RETURNING — migration 052 did not apply';
+      'create_broadcast_with_recipients (8-arg) still has the ambiguous RETURNING — migration 041 did not apply';
   END IF;
 
-  -- Exactly one overload must survive. Two of them (the 8-argument one
-  -- 041 creates plus the 10-argument one 051 creates) make any call
-  -- that leans on p_send_mode/p_body_text defaults fail with
-  -- "function ... is not unique". 050 drops the 8-argument signature
-  -- precisely so a database catching up out of order cannot end up
-  -- here, and this asserts it worked.
+  IF pg_get_functiondef(
+       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb,text,text)'::regprocedure
+     ) NOT LIKE '%RETURNING id, broadcast_recipients.contact_id%' THEN
+    RAISE EXCEPTION
+      'create_broadcast_with_recipients (10-arg plain-text) still has the ambiguous RETURNING — migration 906/908 did not apply';
+  END IF;
+
+  -- Exactly those two, and neither may default p_send_mode /
+  -- p_body_text: a third overload, or defaults on the 10-argument one,
+  -- makes an 8-argument call resolve to two candidates and fail with
+  -- "function ... is not unique" (908 drops the defaults for this
+  -- reason).
   IF (
     SELECT COUNT(*) FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.proname = 'create_broadcast_with_recipients'
-  ) <> 1 THEN
+  ) <> 2 THEN
     RAISE EXCEPTION
-      'create_broadcast_with_recipients has more than one overload — named-argument calls will be ambiguous';
+      'create_broadcast_with_recipients should have exactly two overloads (8-arg upstream + 10-arg plain text)';
+  END IF;
+
+  IF (
+    SELECT COUNT(*) FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'create_broadcast_with_recipients'
+      AND p.pronargdefaults > 0
+  ) <> 0 THEN
+    RAISE EXCEPTION
+      'create_broadcast_with_recipients still declares argument defaults — an 8-argument call would be ambiguous';
+  END IF;
+
+  -- PostgREST flattens a JSONB[] argument into a 2-D scalar array, which
+  -- mis-pairs per-recipient params with contacts. Neither arity may
+  -- carry it (upstream 049 / fork 908).
+  IF to_regprocedure(
+       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[])'
+     ) IS NOT NULL
+     OR to_regprocedure(
+       'public.create_broadcast_with_recipients(uuid,uuid,text,text,text,integer,uuid[],jsonb[],text,text)'
+     ) IS NOT NULL THEN
+    RAISE EXCEPTION
+      'a JSONB[] overload of create_broadcast_with_recipients still exists — migration 049 or 908 did not apply';
   END IF;
 
   -- The failure-reason columns (042) are only ever written by the
@@ -96,59 +123,74 @@ BEGIN
       'messages.error_code/error_title/error_details are missing — migration 042 did not apply';
   END IF;
 
-  -- ----------------------------------------------------------------
-  -- Fork-only line (Evolution API), migrations 047-053.
-  --
-  -- These were never asserted, which is how a whole branch of the
-  -- schema drifted out of production unnoticed: the numbering
-  -- collision that the 040-042 checks above cover only becomes
-  -- visible if the fork's own objects are checked too.
-  -- ----------------------------------------------------------------
-
-  -- 045: the table every Evolution connection, webhook lookup and
-  -- message row hangs off.
-  IF to_regclass('public.whatsapp_connections') IS NULL THEN
-    RAISE EXCEPTION
-      'public.whatsapp_connections is missing — migration 047 did not apply';
-  END IF;
-
-  -- 046: inbound idempotency. Without this index a redelivered
-  -- webhook silently duplicates the message instead of being skipped.
-  IF to_regclass('public.messages_dedup_key') IS NULL THEN
-    RAISE EXCEPTION
-      'messages_dedup_key is missing — migration 048 did not apply';
-  END IF;
-
-  -- 047: the MIME type the inbound media mirror needs to name a file.
+  -- 039 (upstream): the MIME type the inbound media mirror needs to
+  -- name a file.
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'messages'
       AND column_name = 'media_type'
   ) THEN
-    RAISE EXCEPTION 'messages.media_type is missing — migration 049 did not apply';
+    RAISE EXCEPTION 'messages.media_type is missing — migration 039 did not apply';
   END IF;
 
-  -- 048: the reconnect backfill guard.
+  -- ----------------------------------------------------------------
+  -- Fork-only line, migrations 901-908.
+  --
+  -- These were never asserted, which is how a whole branch of the
+  -- schema drifted out of production unnoticed: the numbering
+  -- collision that the 040-042 checks above cover only becomes
+  -- visible if the fork's own objects are checked too.
+  --
+  -- They live in a reserved 900 range so upstream's sequence can never
+  -- collide with them again, and so they always apply after it.
+  -- ----------------------------------------------------------------
+
+  -- 901: the broadcast opt-out backstop. Both the wizard and the public
+  -- API filter on this column before planning a send.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'contacts'
+      AND column_name = 'opted_out_at'
+  ) THEN
+    RAISE EXCEPTION
+      'contacts.opted_out_at is missing — migration 901 did not apply';
+  END IF;
+
+  -- 902: the table every Evolution connection, webhook lookup and
+  -- message row hangs off.
+  IF to_regclass('public.whatsapp_connections') IS NULL THEN
+    RAISE EXCEPTION
+      'public.whatsapp_connections is missing — migration 902 did not apply';
+  END IF;
+
+  -- 903: inbound idempotency. Without this index a redelivered
+  -- webhook silently duplicates the message instead of being skipped.
+  IF to_regclass('public.messages_dedup_key') IS NULL THEN
+    RAISE EXCEPTION
+      'messages_dedup_key is missing — migration 903 did not apply';
+  END IF;
+
+  -- 904: the reconnect backfill guard.
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'whatsapp_connections'
       AND column_name = 'is_syncing'
   ) THEN
     RAISE EXCEPTION
-      'whatsapp_connections.is_syncing is missing — migration 050 did not apply';
+      'whatsapp_connections.is_syncing is missing — migration 904 did not apply';
   END IF;
 
-  -- 049: plain-text broadcasts, the Evolution send mode.
+  -- 905: plain-text broadcasts, the Evolution send mode.
   IF (
     SELECT COUNT(*) FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'broadcasts'
       AND column_name IN ('send_mode', 'body_text')
   ) <> 2 THEN
     RAISE EXCEPTION
-      'broadcasts.send_mode/body_text are missing — migration 051 did not apply';
+      'broadcasts.send_mode/body_text are missing — migration 905 did not apply';
   END IF;
 
-  -- 051: the "is anything actually arriving" signal. Written by the
+  -- 907: the "is anything actually arriving" signal. Written by the
   -- webhook on an untyped update, so a missing column is a runtime
   -- PostgREST error on every inbound batch, not a compile error.
   IF NOT EXISTS (
@@ -157,7 +199,7 @@ BEGIN
       AND column_name = 'last_inbound_at'
   ) THEN
     RAISE EXCEPTION
-      'whatsapp_connections.last_inbound_at is missing — migration 053 did not apply';
+      'whatsapp_connections.last_inbound_at is missing — migration 907 did not apply';
   END IF;
 
   IF EXISTS (
@@ -216,6 +258,29 @@ BEGIN
   IF to_regclass('public.idx_automation_pending_awaiting_reply') IS NULL THEN
     RAISE EXCEPTION
       'idx_automation_pending_awaiting_reply is missing — migration 045 did not apply';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND column_default LIKE '%uuid_generate_v%'
+  ) THEN
+    RAISE EXCEPTION
+      'a public column default still calls uuid-ossp; use gen_random_uuid() so a fresh hosted db push does not hit 42883';
+  END IF;
+
+  IF to_regprocedure('public.dashboard_overview(integer,text)') IS NULL THEN
+    RAISE EXCEPTION 'public.dashboard_overview(integer, text) is missing — migration 059 did not apply';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'messages_track_conversation_times') THEN
+    RAISE EXCEPTION 'messages_track_conversation_times trigger is missing — migration 059 did not apply';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'conversations_stamp_closed_at')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'deals_stamp_closed_at') THEN
+    RAISE EXCEPTION 'closed_at triggers are missing — migration 059 did not apply';
+  END IF;
+  IF has_function_privilege('anon', 'public.dashboard_overview(integer,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'anon can execute dashboard_overview — migration 059 grants are wrong';
   END IF;
 
   RAISE NOTICE 'schema verification passed';

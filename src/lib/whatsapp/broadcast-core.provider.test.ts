@@ -11,7 +11,7 @@ vi.mock('@/lib/api/v1/contacts', () => ({
 // createEvolutionProviderClient actually produces (see
 // providers/evolution-provider.ts). A *template* broadcast must be
 // rejected before any rows are written; a plain_text one goes through
-// on sendText (migration 051).
+// on sendText (migration 905).
 const evolutionClient = {
   name: 'evolution' as const,
   sendText: vi.fn(),

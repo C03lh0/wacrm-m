@@ -59,7 +59,7 @@ export default function NewBroadcastPage() {
     if (sendMode === 'plain_text' && !bodyText.trim()) return;
 
     try {
-      const broadcastId = await createAndSendBroadcast({
+      const { broadcastId, interruption } = await createAndSendBroadcast({
         name,
         sendMode,
         template: sendMode === 'template' ? template : null,
@@ -78,6 +78,8 @@ export default function NewBroadcastPage() {
         // picked; toISOString() converts that to a UTC instant for storage.
         scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
       });
+      if (interruption === 'lease_lost') toast.warning(t('toastSendTakenOver'));
+      if (interruption === 'lease_error') toast.error(t('toastSendInterrupted'));
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
       // Previously swallowed with console.error — the wizard would

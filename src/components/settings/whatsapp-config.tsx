@@ -171,7 +171,7 @@ export function WhatsAppConfig() {
         setVerifyEdited(false);
         setPin('');
         setTokenEdited(false);
-        // Undefined on a row read before migration 049 — treat that as
+        // Undefined on a row read before migration 039 — treat that as
         // on, matching the webhook's own default.
         setMirrorMedia(data.mirror_inbound_media !== false);
       } else {

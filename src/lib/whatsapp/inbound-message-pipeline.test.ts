@@ -60,12 +60,14 @@ interface Script {
   existingMessageAfterRace?: { id: string } | null;
   insertMessageError?: { code?: string } | null;
   insertedMessageId?: string;
-  priorCustomerMsgCount?: number;
+  /** Whether the conditional UPDATE on first_inbound_at wins the claim. */
+  firstInboundUnclaimed?: boolean;
   broadcastRecipients?: unknown[];
 }
 
 function makeDb(script: Script) {
   let dedupLookupCalls = 0;
+  let firstInboundClaims = 0;
   const messageInserts: Record<string, unknown>[] = [];
   const conversationUpdates: Record<string, unknown>[] = [];
   const flowRunUpdates: Record<string, unknown>[] = [];
@@ -78,6 +80,7 @@ function makeDb(script: Script) {
 
     b.select = chain;
     b.eq = chain;
+    b.is = chain;
     b.in = chain;
     b.order = chain;
     b.limit = chain;
@@ -118,11 +121,18 @@ function makeDb(script: Script) {
       return Promise.resolve({ data: null, error: null });
     };
 
-    // Thenable — covers the prior-inbound-count query (no terminal call)
-    // and the broadcast_recipients / conversations update queries.
+    // Thenable — covers the first-inbound claim and the
+    // broadcast_recipients / conversations update queries.
     b.then = (resolve: (v: unknown) => unknown) => {
+      // claimFirstInboundMessage: one conditional UPDATE, and only the
+      // caller that moved a row sees a non-empty result.
+      if (table === 'conversations' && mode === 'update') {
+        const won = script.firstInboundUnclaimed !== false;
+        firstInboundClaims += 1;
+        return resolve({ data: won && firstInboundClaims === 1 ? [{ id: 'conv-1' }] : [], error: null });
+      }
       if (table === 'messages' && mode === 'select') {
-        return resolve({ data: [], error: null, count: script.priorCustomerMsgCount ?? 0 });
+        return resolve({ data: [], error: null });
       }
       if (table === 'broadcast_recipients') {
         return resolve({ data: script.broadcastRecipients ?? [], error: null });
@@ -172,7 +182,6 @@ describe('ingestParsedMessage — idempotency', () => {
     const { db, messageInserts, rpcCalls } = makeDb({
       existingMessage: null,
       insertedMessageId: 'msg-1',
-      priorCustomerMsgCount: 0,
     });
 
     const result = await ingestParsedMessage(db, RESOLVED, baseParams());
@@ -248,6 +257,48 @@ describe('ingestParsedMessage — idempotency', () => {
     expect(r2?.messageId).toBe('msg-2');
     expect(r1?.duplicate).toBe(false);
     expect(r2?.duplicate).toBe(false);
+  });
+});
+
+describe('ingestParsedMessage — first_inbound_message fires once', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const firstInboundRuns = () =>
+    (runAutomationsForTrigger.mock.calls as unknown as [{ triggerType: string }][]).filter(
+      ([arg]) => arg.triggerType === 'first_inbound_message',
+    ).length;
+
+  // The trigger used to be decided by counting prior customer rows, so two
+  // concurrent first deliveries both read zero and both fired. The claim is
+  // a conditional UPDATE instead: only the delivery that moves the row wins.
+  it('fires for the delivery that wins the claim', async () => {
+    const { db } = makeDb({ existingMessage: null, insertedMessageId: 'msg-1' });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    expect(firstInboundRuns()).toBe(1);
+  });
+
+  it('stays silent for a delivery that lost the claim', async () => {
+    const { db } = makeDb({
+      existingMessage: null,
+      insertedMessageId: 'msg-2',
+      firstInboundUnclaimed: false,
+    });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams({ providerMessageId: 'wamid-2' }));
+
+    expect(firstInboundRuns()).toBe(0);
+  });
+
+  it('never claims on a replayed delivery', async () => {
+    const { db, conversationUpdates } = makeDb({ existingMessage: { id: 'msg-existing' } });
+
+    await ingestParsedMessage(db, RESOLVED, baseParams());
+
+    expect(conversationUpdates).toHaveLength(0);
   });
 });
 

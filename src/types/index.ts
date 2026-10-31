@@ -124,7 +124,7 @@ export interface Contact {
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
    *  Inbox conversation list, for tag filtering). Absent otherwise. */
   tags?: Tag[];
-  /** Set when the contact opted out of broadcasts (migration 039).
+  /** Set when the contact opted out of broadcasts (migration 901).
    *  Null/absent means "not opted out" — today's implicit default. */
   opted_out_at?: string | null;
 }
@@ -180,6 +180,9 @@ export interface Conversation {
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;
+  last_inbound_at?: string | null;
+  last_reply_at?: string | null;
+  closed_at?: string | null;
   created_at: string;
   updated_at: string;
   contact?: Contact;
@@ -243,7 +246,7 @@ export interface Message {
   /**
    * MIME type of `media_url`'s content, as Meta reported it. Inbound
    * media only — outbound URLs already carry a filename and extension.
-   * Null on every row written before migration 049.
+   * Null on every row written before migration 039.
    */
   media_type?: string | null;
   template_name?: string;
@@ -420,12 +423,12 @@ export interface Broadcast {
   id: string;
   user_id: string;
   name: string;
-  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 051. */
+  /** 'template' (Meta, default) or 'plain_text' (Evolution). Added in migration 905. */
   send_mode?: 'template' | 'plain_text';
   template_name: string | null;
   template_language: string | null;
   template_variables?: Record<string, unknown>;
-  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 051. */
+  /** Plain-text body for send_mode='plain_text' broadcasts. Added in migration 905. */
   body_text?: string | null;
   audience_filter?: Record<string, unknown>;
   scheduled_at?: string;
@@ -442,6 +445,7 @@ export interface Broadcast {
    * send. Added in migration 038.
    */
   delivery_locked_at?: string | null;
+  delivery_lease_until?: string | null;
   created_at: string;
 }
 
@@ -619,6 +623,7 @@ export interface ConditionStepConfig {
   operand?: string;
   /** For contact_field equals / message_content contains — comparison value */
   value?: string;
+  timezone?: string;
 }
 
 export interface SendWebhookStepConfig {

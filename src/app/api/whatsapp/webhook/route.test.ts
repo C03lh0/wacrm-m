@@ -5,6 +5,8 @@ const h = vi.hoisted(() => ({
   resolveContactAndConversation: vi.fn(),
   ingestParsedMessage: vi.fn(),
   lookupInternalIdByProviderMessageId: vi.fn(),
+  applyMessageStatus: vi.fn(),
+  dispatchWebhookEvent: vi.fn(),
   state: {
     conversation: { id: 'conv-1', unread_count: 0, account_id: 'acc-1' },
     afterCallbacks: [] as (() => Promise<void> | void)[],
@@ -18,8 +20,8 @@ const h = vi.hoisted(() => ({
     }[],
     /** Error the next storage upload resolves with, if any. */
     storageUploadError: null as { message: string } | null,
-    /** Patches applied to `messages` by a status webhook (#535). */
-    messageUpdates: [] as Record<string, unknown>[],
+    /** whatsapp_config reads a status webhook performed, for scoping. */
+    whatsappConfigLookups: [] as { columns: string; value: unknown }[],
     /** Row the status webhook's broadcast_recipients lookup resolves. */
     broadcastRecipient: null as { id: string; status: string } | null,
     /** Patches applied to that broadcast_recipients row. */
@@ -49,15 +51,27 @@ vi.mock('@/lib/whatsapp/inbound-message-pipeline', () => ({
   lookupInternalIdByProviderMessageId: h.lookupInternalIdByProviderMessageId,
 }))
 
+vi.mock('@/lib/webhooks/deliver', () => ({
+  dispatchWebhookEvent: h.dispatchWebhookEvent,
+}))
+
+// Status handling moved into message-status-sync (forward-only ladder,
+// account-scoped); the route's job is to resolve the account from
+// metadata.phone_number_id and hand the status over.
+vi.mock('@/lib/whatsapp/message-status-sync', () => ({
+  applyMessageStatus: h.applyMessageStatus,
+}))
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from(table: string) {
       switch (table) {
         case 'whatsapp_config':
           return {
-            select: () => ({
-              eq: () =>
-                Promise.resolve({
+            select: (columns: string) => ({
+              eq: (_column: string, value: unknown) => {
+                h.state.whatsappConfigLookups.push({ columns, value })
+                return Promise.resolve({
                   data: [
                     {
                       id: 'cfg-1',
@@ -68,7 +82,8 @@ vi.mock('@supabase/supabase-js', () => ({
                     },
                   ],
                   error: null,
-                }),
+                })
+              },
             }),
           }
         case 'messages':
@@ -82,11 +97,6 @@ vi.mock('@supabase/supabase-js', () => ({
                 }),
               }),
             }),
-            // Status mirror (#535): update(...).eq('message_id', ...)
-            update: (patch: Record<string, unknown>) => {
-              h.state.messageUpdates.push(patch)
-              return { eq: () => Promise.resolve({ error: null }) }
-            },
           }
         case 'broadcast_recipients':
           return {
@@ -99,10 +109,21 @@ vi.mock('@supabase/supabase-js', () => ({
                   }),
               }),
             }),
-            update: (patch: Record<string, unknown>) => {
-              h.state.recipientUpdates.push(patch)
-              return { eq: () => Promise.resolve({ error: null }) }
-            },
+            update: (patch: Record<string, unknown>) => ({
+              eq: () => ({
+                in: (_column: string, allowed: string[]) => ({
+                  select: () => {
+                    const row = h.state.broadcastRecipient
+                    const matches = !!row && allowed.includes(row.status)
+                    if (matches) h.state.recipientUpdates.push(patch)
+                    return Promise.resolve({
+                      data: matches ? [{ id: row!.id }] : [],
+                      error: null,
+                    })
+                  },
+                }),
+              }),
+            }),
           }
         default:
           throw new Error(`unexpected table: ${table}`)
@@ -150,6 +171,7 @@ vi.mock('@/lib/whatsapp/template-webhook', () => ({
 import { POST } from './route'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { handleTemplateWebhookChange } from '@/lib/whatsapp/template-webhook'
+import { MAX_WEBHOOK_BODY_BYTES } from '@/lib/whatsapp/webhook-body'
 
 const mockGetMediaUrl = vi.mocked(getMediaUrl)
 const mockDownloadMedia = vi.mocked(downloadMedia)
@@ -184,10 +206,7 @@ function inboundRequest(
       },
     ],
   }
-  return {
-    text: async () => JSON.stringify(body),
-    headers: { get: () => 'sha256=stub' },
-  } as unknown as Request
+  return signedPost(JSON.stringify(body))
 }
 
 async function runWebhook(
@@ -198,6 +217,14 @@ async function runWebhook(
   // Drain the after() callback exactly as the runtime would.
   for (const cb of h.state.afterCallbacks) await cb()
   return res
+}
+
+function signedPost(body: BodyInit) {
+  return new Request('http://localhost/api/whatsapp/webhook', {
+    method: 'POST',
+    headers: { 'x-hub-signature-256': 'sha256=stub' },
+    body,
+  })
 }
 
 /** A message-status webhook (sent / delivered / read / failed). */
@@ -217,10 +244,7 @@ async function runStatusWebhook(status: Record<string, unknown>) {
       },
     ],
   }
-  const res = await POST({
-    text: async () => JSON.stringify(body),
-    headers: { get: () => 'sha256=stub' },
-  } as unknown as Request)
+  const res = await POST(signedPost(JSON.stringify(body)))
   for (const cb of h.state.afterCallbacks) await cb()
   return res
 }
@@ -232,7 +256,8 @@ beforeEach(() => {
   h.state.mirrorInboundMedia = true
   h.state.storageUploads = []
   h.state.storageUploadError = null
-  h.state.messageUpdates = []
+  h.state.whatsappConfigLookups = []
+  h.applyMessageStatus.mockResolvedValue([])
   h.state.broadcastRecipient = null
   h.state.recipientUpdates = []
   h.resolveContactAndConversation.mockResolvedValue({
@@ -448,7 +473,7 @@ describe('inbound webhook: inbound media is mirrored (#466)', () => {
     })
   })
 
-  it('mirrors when the column is absent, e.g. a row read before migration 049', async () => {
+  it('mirrors when the column is absent, e.g. a row read before migration 039', async () => {
     h.state.mirrorInboundMedia = undefined
 
     await runWebhook(IMAGE_MESSAGE)
@@ -586,12 +611,7 @@ describe('template-lifecycle webhooks: WABA id is threaded to the handler (#534)
         },
       ],
     }
-    const req = {
-      text: async () => JSON.stringify(body),
-      headers: { get: () => 'sha256=stub' },
-    } as unknown as Request
-
-    await POST(req)
+    await POST(signedPost(JSON.stringify(body)))
     for (const cb of h.state.afterCallbacks) await cb()
 
     const mockHandle = vi.mocked(handleTemplateWebhookChange)
@@ -626,7 +646,7 @@ describe('status webhook: failed statuses keep Meta\'s reason (#535)', () => {
     ],
   }
 
-  it('persists code, title and details on the messages row in the same update as status', async () => {
+  it('hands code, title and details to the message status sync with the status', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       await runStatusWebhook(FAILED_STATUS)
@@ -634,12 +654,16 @@ describe('status webhook: failed statuses keep Meta\'s reason (#535)', () => {
       warn.mockRestore()
     }
 
-    expect(h.state.messageUpdates).toHaveLength(1)
-    expect(h.state.messageUpdates[0]).toEqual({
+    expect(h.applyMessageStatus).toHaveBeenCalledTimes(1)
+    expect(h.applyMessageStatus.mock.calls[0][2]).toEqual({
+      wamid: 'wamid.OUT1',
       status: 'failed',
-      error_code: 131049,
-      error_title: FAILED_STATUS.errors[0].title,
-      error_details: FAILED_STATUS.errors[0].error_data.details,
+      failure: {
+        code: 131049,
+        title: FAILED_STATUS.errors[0].title,
+        details: FAILED_STATUS.errors[0].error_data.details,
+      },
+      statusAt: new Date(1700000100 * 1000).toISOString(),
     })
   })
 
@@ -683,7 +707,10 @@ describe('status webhook: failed statuses keep Meta\'s reason (#535)', () => {
       warn.mockRestore()
     }
     expect(warn).not.toHaveBeenCalled()
-    expect(h.state.messageUpdates).toEqual([{ status: 'failed' }])
+    expect(h.applyMessageStatus.mock.calls[0][2]).toMatchObject({
+      status: 'failed',
+      failure: null,
+    })
   })
 
   it('a plain delivered status updates only status — error columns untouched', async () => {
@@ -701,9 +728,101 @@ describe('status webhook: failed statuses keep Meta\'s reason (#535)', () => {
     }
 
     expect(warn).not.toHaveBeenCalled()
-    expect(h.state.messageUpdates).toEqual([{ status: 'delivered' }])
+    expect(h.applyMessageStatus.mock.calls[0][2]).toMatchObject({
+      status: 'delivered',
+      failure: null,
+    })
     expect(h.state.recipientUpdates).toHaveLength(1)
     expect(h.state.recipientUpdates[0]).not.toHaveProperty('error_message')
     expect(h.state.recipientUpdates[0]).not.toHaveProperty('error_code')
+  })
+
+  it('a late delivered status never regresses a recipient that is already read', async () => {
+    h.state.broadcastRecipient = { id: 'rec-1', status: 'read' }
+    await runStatusWebhook({
+      id: 'wamid.OUT1',
+      status: 'delivered',
+      timestamp: '1700000100',
+      recipient_id: '15551230000',
+    })
+
+    expect(h.applyMessageStatus.mock.calls[0][2]).toMatchObject({
+      status: 'delivered',
+    })
+    expect(h.state.recipientUpdates).toHaveLength(0)
+  })
+})
+
+describe('inbound webhook: oversized body cap', () => {
+  it('answers 413 for a body over the cap and schedules no processing', async () => {
+    const before = h.state.afterCallbacks.length
+    const res = (await POST(signedPost('x'.repeat(MAX_WEBHOOK_BODY_BYTES + 1)))) as unknown as {
+      init?: { status?: number }
+    }
+    expect(res.init?.status).toBe(413)
+    expect(h.state.afterCallbacks).toHaveLength(before)
+  })
+
+  it('answers 413 from the declared Content-Length alone', async () => {
+    const before = h.state.afterCallbacks.length
+    const req = new Request('http://localhost/api/whatsapp/webhook', {
+      method: 'POST',
+      headers: { 'content-length': String(MAX_WEBHOOK_BODY_BYTES + 1), 'x-hub-signature-256': 'sha256=stub' },
+      body: '{}',
+    })
+    const res = (await POST(req)) as unknown as { init?: { status?: number } }
+    expect(res.init?.status).toBe(413)
+    expect(h.state.afterCallbacks).toHaveLength(before)
+  })
+
+  it('lets a body at the cap through to JSON parsing', async () => {
+    const res = (await POST(signedPost('x'.repeat(MAX_WEBHOOK_BODY_BYTES)))) as unknown as {
+      init?: { status?: number }
+    }
+    expect(res.init?.status).toBe(400)
+  })
+})
+
+describe('status webhook: scoped to the receiving number', () => {
+  const DELIVERED = {
+    id: 'wamid.OUT1',
+    status: 'delivered',
+    timestamp: '1700000100',
+    recipient_id: '15551230000',
+  }
+
+  it('resolves the account from metadata.phone_number_id before touching messages', async () => {
+    await runStatusWebhook(DELIVERED)
+
+    expect(h.state.whatsappConfigLookups).toEqual([
+      { columns: 'account_id', value: 'pn-1' },
+    ])
+    expect(h.applyMessageStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      'acc-1',
+      expect.objectContaining({ wamid: 'wamid.OUT1' }),
+    )
+  })
+
+  it('dispatches message.status_updated to that account for each row that advanced', async () => {
+    h.applyMessageStatus.mockResolvedValue([{ id: 'm1', conversation_id: 'conv-9' }])
+
+    await runStatusWebhook(DELIVERED)
+
+    expect(h.dispatchWebhookEvent).toHaveBeenCalledTimes(1)
+    expect(h.dispatchWebhookEvent.mock.calls[0].slice(1)).toEqual([
+      'acc-1',
+      'message.status_updated',
+      {
+        whatsapp_message_id: 'wamid.OUT1',
+        conversation_id: 'conv-9',
+        status: 'delivered',
+      },
+    ])
+  })
+
+  it('dispatches nothing when the status was stale and moved no row', async () => {
+    await runStatusWebhook(DELIVERED)
+    expect(h.dispatchWebhookEvent).not.toHaveBeenCalled()
   })
 })

@@ -15,6 +15,7 @@ import { assertConversationInAccount } from '@/lib/whatsapp/conversation-scope'
 import {
   resolveTemplateRow,
   templateContentText,
+  templateHeaderMediaUrl,
 } from '@/lib/whatsapp/template-body'
 import { supabaseAdmin } from './admin-client'
 import { getT } from '@/lib/i18n/translate'
@@ -163,10 +164,8 @@ async function sendViaProvider(
     input.accountId,
   )
 
-  // Local template row — read for the body we persist below, not for
-  // the Meta payload (the wire shape is deliberately unchanged here).
-  // A missing row is fine: the send still goes out, we just can't
-  // reconstruct the text the customer saw.
+  // Local template row. A missing row is fine: the send still goes
+  // out, we just can't reconstruct the text the customer saw.
   const templateRow =
     input.kind === 'template'
       ? (
@@ -192,6 +191,7 @@ async function sendViaProvider(
         to: phone,
         templateName: input.templateName,
         language: input.language,
+        template: templateRow ?? undefined,
         params: input.params,
       })
       return r.providerMessageId
@@ -246,6 +246,7 @@ async function sendViaProvider(
     sender_type: 'bot',
     content_type,
     content_text,
+    media_url: templateHeaderMediaUrl(templateRow),
     template_name,
     message_id: waMessageId,
     provider: kind,

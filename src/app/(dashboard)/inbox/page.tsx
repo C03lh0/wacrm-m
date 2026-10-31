@@ -12,12 +12,18 @@ import type { Conversation, Message, Contact, ConversationStatus } from "@/types
 import { useRealtime } from "@/hooks/use-realtime";
 import type { WhatsAppConnectionStatus } from "@/lib/whatsapp/connection-status";
 import { ConversationList } from "@/components/inbox/conversation-list";
+import { parseInboxFilter } from "@/lib/inbox/inbox-filters";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
 import { Loader2, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { mergeMessages, messagesForThread } from "@/lib/inbox/merge-messages";
+import {
+  applyMessageUpdate,
+  applyRealtimeInsert,
+  mergeFetchedPage,
+  prependOlderMessages,
+} from "@/lib/inbox/optimistic-messages";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -201,15 +207,7 @@ function InboxPageInner() {
           activeConversation &&
           newMsg.conversation_id === activeConversation.id
         ) {
-          setMessages((prev) => {
-            // Avoid duplicates
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            // Replace optimistic message if it exists
-            const withoutOptimistic = prev.filter(
-              (m) => !m.id.startsWith("temp-")
-            );
-            return [...withoutOptimistic, newMsg];
-          });
+          setMessages((prev) => applyRealtimeInsert(prev, newMsg));
         }
 
         // Update conversation list preview. We need to know *synchronously*
@@ -482,29 +480,22 @@ function InboxPageInner() {
 
 
   /**
-   * Accepts a fetched page of messages for one conversation and merges
-   * it into state, rather than replacing state outright.
-   *
-   * Merging matters for two reasons. The thread now fetches a bounded
-   * page instead of the whole history, so older pages the user has
-   * scrolled back through must survive the next resync. And a realtime
-   * INSERT can land between the query leaving and its rows arriving — a
-   * blind replace would drop that message until the next refetch, which
-   * is the class of bug this whole change is fixing.
-   *
-   * Scoped to one conversation on purpose: switching threads has to
-   * replace, never accumulate. Optimistic `temp-` rows are dropped, as
-   * the previous replace-everything behaviour already did; the realtime
-   * INSERT that confirms the send brings back the real row.
+   * Merges a fetched page into state instead of replacing it: the
+   * thread fetches a bounded newest-first page, so older pages the user
+   * scrolled back to must survive a resync, and a realtime INSERT that
+   * lands mid-query must not be thrown away. `mergeFetchedPage` also
+   * keeps unconfirmed optimistic rows that the page doesn't account for.
    */
   const handleMessagesLoaded = useCallback(
     (loaded: Message[], conversationId: string) => {
-      setMessages((prev) =>
-        mergeMessages(messagesForThread(prev, conversationId), loaded)
-      );
+      setMessages((prev) => mergeFetchedPage(prev, loaded, conversationId));
     },
-    []
+    [],
   );
+
+  const handleOlderMessagesLoaded = useCallback((older: Message[]) => {
+    setMessages((prev) => prependOlderMessages(prev, older));
+  }, []);
 
   const handleNewMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -515,9 +506,7 @@ function InboxPageInner() {
 
   const handleUpdateMessage = useCallback(
     (id: string, updates: Partial<Message>) => {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
-      );
+      setMessages((prev) => applyMessageUpdate(prev, id, updates));
     },
     []
   );
@@ -599,6 +588,7 @@ function InboxPageInner() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            initialFilter={parseInboxFilter(searchParams.get("filter"))}
           />
         </div>
 
@@ -623,6 +613,7 @@ function InboxPageInner() {
             contact={activeContact}
             messages={messages}
             onMessagesLoaded={handleMessagesLoaded}
+            onOlderMessagesLoaded={handleOlderMessagesLoaded}
             onNewMessage={handleNewMessage}
             onUpdateMessage={handleUpdateMessage}
             onStatusChange={handleStatusChange}

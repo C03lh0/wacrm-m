@@ -98,6 +98,7 @@ export async function POST(request: Request) {
         accepted: plan.planned.length,
         rejected: plan.rejected,
         opted_out: plan.optedOut,
+        duplicates: plan.duplicates,
       },
       202
     );

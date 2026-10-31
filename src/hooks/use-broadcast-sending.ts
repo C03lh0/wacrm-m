@@ -12,6 +12,11 @@ import {
   type AudienceConfig,
 } from '@/lib/broadcast-audience';
 import { normalizeKey } from '@/lib/contacts/dedupe';
+import {
+  acquireWizardDeliveryLease,
+  renewWizardDeliveryLease,
+  type DeliveryLeaseResult,
+} from '@/lib/whatsapp/broadcast-delivery-lease';
 import { fetchAllInChunks, fetchAllPages } from '@/lib/supabase/paged-query';
 import { BroadcastRecipient, Contact, MessageTemplate } from '@/types';
 import {
@@ -57,8 +62,15 @@ interface BroadcastPayload {
   scheduledAt?: string;
 }
 
+export type BroadcastSendInterruption = 'lease_lost' | 'lease_error';
+
+export interface BroadcastSendOutcome {
+  broadcastId: string;
+  interruption: BroadcastSendInterruption | null;
+}
+
 interface UseBroadcastSendingReturn {
-  createAndSendBroadcast: (payload: BroadcastPayload) => Promise<string>;
+  createAndSendBroadcast: (payload: BroadcastPayload) => Promise<BroadcastSendOutcome>;
   isProcessing: boolean;
   progress: number;
 }
@@ -83,6 +95,22 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+class DeliveryLeaseInterrupted extends Error {
+  constructor(readonly interruption: BroadcastSendInterruption) {
+    super(interruption);
+  }
+}
+
+function heldLeaseOrThrow(result: DeliveryLeaseResult): string {
+  if (result.status === 'held') return result.lease;
+  if (result.status === 'error') {
+    console.error('[broadcast] delivery lease renewal failed:', result.message);
+  }
+  throw new DeliveryLeaseInterrupted(
+    result.status === 'lost' ? 'lease_lost' : 'lease_error',
+  );
+}
+
 interface BroadcastApiResult {
   phone: string;
   status: 'sent' | 'failed';
@@ -104,7 +132,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       upsertCsvContacts(supabase, rows),
     );
 
-    // Exclude contacts who opted out of broadcasts (migration 039) —
+    // Exclude contacts who opted out of broadcasts (migration 901) —
     // same compliance backstop enforced by the public API's
     // createBroadcast, so the dashboard wizard and the API agree.
     return contacts.filter((c) => !c.opted_out_at);
@@ -215,7 +243,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       .filter((c): c is Contact => Boolean(c));
   }
 
-  async function createAndSendBroadcast(payload: BroadcastPayload): Promise<string> {
+  async function createAndSendBroadcast(payload: BroadcastPayload): Promise<BroadcastSendOutcome> {
     setIsProcessing(true);
     setProgress(0);
 
@@ -341,6 +369,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             .update({
               status: 'failed',
               failed_count: contacts.length,
+              delivery_lease_until: null,
             })
             .eq('id', broadcast.id);
           throw new Error(
@@ -396,6 +425,16 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       const messageParams =
         isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
 
+      let heldLease: string | null = null;
+      const keepDeliveryLease = async () => {
+        heldLease = heldLeaseOrThrow(
+          heldLease === null
+            ? await acquireWizardDeliveryLease(supabase, broadcast.id)
+            : await renewWizardDeliveryLease(supabase, broadcast.id, heldLease),
+        );
+      };
+      let interruption: BroadcastSendInterruption | null = null;
+
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
 
@@ -410,6 +449,14 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           }));
 
         if (apiRecipients.length === 0) continue;
+
+        try {
+          await keepDeliveryLease();
+        } catch (err) {
+          if (!(err instanceof DeliveryLeaseInterrupted)) throw err;
+          interruption = err.interruption;
+          break;
+        }
 
         try {
           // Send the batch, waiting out a 429 rather than writing the
@@ -446,6 +493,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
               throw new Error(data.error || t('apiRequestFailed'));
             }
             await sleep(retryIn);
+            await keepDeliveryLease();
           }
 
           const resultsByPhone = new Map<string, BroadcastApiResult>();
@@ -491,6 +539,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             }
           }
         } catch (err) {
+          if (err instanceof DeliveryLeaseInterrupted) {
+            interruption = err.interruption;
+            break;
+          }
           for (const recipient of batch) {
             failedCount++;
             await supabase
@@ -516,14 +568,19 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       // Aggregate counts are maintained by the DB trigger (migration
       // 003); we only flip the final status here.
       setProgress(95);
-      const finalStatus = failedCount === totalRecipients ? 'failed' : 'sent';
-      await supabase
-        .from('broadcasts')
-        .update({ status: finalStatus })
-        .eq('id', broadcast.id);
+      if (!interruption) {
+        const finalStatus = failedCount === totalRecipients ? 'failed' : 'sent';
+        const finalize = supabase
+          .from('broadcasts')
+          .update({ status: finalStatus, delivery_lease_until: null })
+          .eq('id', broadcast.id);
+        await (heldLease === null
+          ? finalize.is('delivery_lease_until', null)
+          : finalize.eq('delivery_lease_until', heldLease));
+      }
 
       setProgress(100);
-      return broadcast.id;
+      return { broadcastId: broadcast.id, interruption };
     } finally {
       setIsProcessing(false);
     }
