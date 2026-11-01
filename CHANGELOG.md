@@ -9,6 +9,282 @@ Versions follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0, `MINOR` bumps cover new modules; `PATCH` bumps cover bug fixes
 and polish.
 
+## [0.10.0] — 2026-10-31
+
+Syncs this fork with 89 commits of upstream work (through upstream
+PR #700). The headline is a **rebuilt dashboard** that leads with what
+needs doing rather than vanity counters, and a long overdue pass on the
+**inbox on a phone**. Behind those sits the largest database-integrity
+wave upstream has shipped: thirteen migrations closing races, authz
+holes and silent data loss across accounts, automations, flows, AI
+replies, templates and broadcasts.
+
+Everything the fork adds on top of upstream — WhatsApp via QR code
+(Evolution API), plain-text broadcasts, the password-recovery session
+lock, and the runtime language switcher — is unchanged and still works.
+Two of upstream's fixes were ported *into* the fork's shared inbound
+pipeline rather than left in the Meta webhook, so Evolution connections
+get them too (see **Fixed**).
+
+> **Migration required.** Apply these in order from
+> `supabase/migrations/`:
+> `047_account_membership_integrity.sql`,
+> `048_quick_reply_content_matches_kind.sql`,
+> `049_broadcast_params_jsonb.sql`,
+> `051_automation_pending_integrity.sql`,
+> `052_flow_run_integrity.sql`,
+> `053_ai_reply_integrity.sql`,
+> `054_webhook_status_integrity.sql`,
+> `055_authz_membership_holes.sql`,
+> `057_message_templates_account_unique.sql`,
+> `058_engine_race_gaps.sql`,
+> `059_dashboard_overview.sql`,
+> `908_broadcast_plain_text_params_jsonb.sql`,
+> `909_redeem_invitation_whatsapp_connections.sql`,
+> `910_gen_random_uuid_defaults.sql`.
+>
+> There is no `050` or `056` — upstream reserved those numbers for PRs
+> that were reworked before merging. The gap is harmless; migrations
+> apply in filename order, not by sequence.
+>
+> To confirm the result, run `supabase/ci/verify-schema.sql` against
+> your project. It is a single `DO` block, so a clean run returns no
+> rows; a missing object raises an exception naming the migration.
+
+> **Migration renumbering — this is the last time.** Upstream's sequence
+> collided with this fork's for the third release running, so the fork's
+> own migrations have moved into a **reserved `900` range** where
+> upstream's numbering can never reach them again. Upstream keeps every
+> number it uses:
+>
+> | was (0.9.0) | now |
+> | --- | --- |
+> | `039_contact_opt_out` | `901_contact_opt_out` |
+> | `047_whatsapp_connections` | `902_whatsapp_connections` |
+> | `048_message_idempotency` | `903_message_idempotency` |
+> | `050_whatsapp_connections_backfill_status` | `904_whatsapp_connections_backfill_status` |
+> | `051_broadcast_plain_text` | `905_broadcast_plain_text` |
+> | `052_fix_broadcast_plain_text_contact_id_ambiguity` | `906_fix_broadcast_plain_text_contact_id_ambiguity` |
+> | `053_whatsapp_connections_last_inbound_at` | `907_whatsapp_connections_last_inbound_at` |
+>
+> `049_inbound_media_mirror` moved in the other direction: it is
+> upstream's file, displaced by an earlier collision, and is back at its
+> own number `039`. Mind that `049` now means something else entirely —
+> upstream's `049_broadcast_params_jsonb`, which is in the list above.
+> **Check those two by filename, not by number.**
+>
+> The SQL inside the seven renamed files did not change, only their
+> filenames. A fresh install needs nothing special. On an **existing**
+> install they are already applied under their old numbers; all seven are
+> re-runnable (`IF NOT EXISTS` / `CREATE OR REPLACE` throughout), so
+> letting tooling replay them is harmless, and
+> `supabase migration repair --status applied <version>` reconciles the
+> ledger if you would rather not.
+
+### Added
+
+- **A dashboard that leads with what needs doing.** Replaces the counter
+  grid with an attention row — unanswered conversations, stalled deals,
+  broadcasts that failed — backed by a single database function instead
+  of a dozen client queries, so it stays accurate on accounts with more
+  than 1,000 of anything. Comes with a configurable **reply-time
+  target**: the median first response is measured against the target you
+  set rather than an assumed one.
+- **The inbox works on a phone.** The composer is reachable and sized for
+  touch, and Enter inserts a newline there instead of sending
+  mid-sentence — sending is the button, as every other messaging app on a
+  phone behaves.
+- **Long threads load in pages.** Opening a conversation with months of
+  history no longer fetches all of it; older messages load as you scroll
+  up, and a message that failed to send stays visible in place instead of
+  vanishing on the next refresh.
+- **Templates render as they will arrive.** Header, footer and buttons now
+  appear in the thread, so what you see before sending is what the
+  customer gets. Templates with **named variables** (`{{order_id}}`, not
+  just `{{1}}`) are supported end to end, including in the broadcast
+  personalisation step.
+- **Per-account reply-time target and inbox settings** under
+  **Settings → Inbox**, plus a `/api/whatsapp/health` endpoint for
+  checking a connection without opening the UI.
+
+### Fixed
+
+- **Broadcast personalisation could send the wrong values to the wrong
+  people.** Per-recipient `{{1}}` parameters were passed to the database
+  as `JSONB[]`, which PostgREST flattens into a 2-D scalar array — the
+  pairing between contact and parameters was lost on any send with more
+  than one variable. Both the upstream function and this fork's
+  plain-text overload are re-cut to take `JSONB`.
+  (Migrations `049` and `908`)
+- **A first-time contact could trigger the first-inbound automation
+  twice.** The "is this their first message" test counted prior messages,
+  so two deliveries arriving together both saw zero. It is now an atomic
+  claim on `conversations.first_inbound_at`: exactly one delivery wins.
+  Ported into the fork's shared inbound pipeline, so **Evolution
+  connections get this too**, not only Meta. (Migration `054`)
+- **Delivery statuses could be applied across accounts and go
+  backwards.** A status callback is now matched to the number that
+  received it and only ever moves a message forward
+  (`sent` → `delivered` → `read`), so a late `sent` callback no longer
+  un-reads a read message.
+- **Account membership could be corrupted or silently deleted.**
+  Redeeming an invitation, transferring ownership and removing a member
+  are now single atomic operations, with the privilege columns on
+  `profiles` enforced by trigger rather than by the API alone. This
+  fork's `whatsapp_connections` is included in the "is the old account
+  empty" check, so an account holding nothing but an Evolution
+  connection can no longer be deleted out from under it.
+  (Migrations `047`, `055`, `909`)
+- **Races across the engines.** AI handoff, flow-run transitions,
+  knowledge ingestion and broadcast resume could each double-process work
+  under concurrency; claims are now conditional updates and broadcast
+  delivery takes a lease. Parked automation runs resume on the correct
+  step, honour pauses, and respect the account's time zone.
+  (Migrations `051`, `052`, `053`, `058`)
+- **The inbound media proxy could serve active content from the app's own
+  origin**, making a received file a vector for script execution against
+  the dashboard. Responses now carry
+  `Content-Security-Policy: default-src 'none'; sandbox` and `nosniff`,
+  the content type is validated rather than echoed, and anything outside
+  a small inline-safe list of image, audio and video types is forced to
+  download instead of rendering.
+- **WhatsApp configuration no longer reaches Meta without an admin.** The
+  config endpoints require the admin role before forwarding anything, and
+  routes that fan out to Meta or fire automations are rate budgeted. The
+  inbound webhook caps the request body (4 MiB) and compares verify
+  tokens in constant time.
+- **The AI assistant stopped answering over a human.** After an agent
+  takes over a conversation the assistant stays quiet, knowledge lookup
+  matches any keyword rather than all of them, and a partially indexed
+  document reports as such instead of appearing complete. A stored API
+  key is only reused for the same provider *and* endpoint.
+- **A fresh hosted database push failed on `uuid-ossp`.** Column defaults
+  called `uuid_generate_v4()`, which on hosted Supabase is installed
+  outside the search path a migration runs under — the extension line
+  succeeded and the next `CREATE TABLE` failed with 42883. Defaults are
+  `gen_random_uuid()` now, and migration `910` converges databases
+  created before the change. (Migration `910`)
+- Duplicate message templates per account are prevented by a unique
+  index, templates and tags are scoped to the account, contact phone
+  matching is strict with digit-aware search, `find-or-create` no longer
+  wipes a contact's tags, and `DELETE` on a row outside the caller's
+  account answers 404 instead of succeeding quietly.
+  (Migrations `048`, `057`)
+
+### Changed
+
+- **Runtime moved to Node 22 LTS**, lifting the dependency caps Node 20
+  held back. Next.js builds run Turbopack's PostCSS in worker threads.
+- The inbox's message merging was replaced by upstream's optimistic
+  message handling, which covers the same cases and more (temporary
+  bubbles, realtime inserts, status updates, older-page prepends). The
+  fork's `src/lib/inbox/merge-messages.ts` is gone.
+- Dependency bumps: `@xyflow/react`, `@base-ui/react`, `lucide-react`,
+  `next-intl`, `shadcn`, `prettier`.
+
+## [0.9.0] — 2026-10-14
+
+Syncs this fork with 64 commits of upstream work (through upstream
+PR #637). Headline additions: automations can now **wait for a customer
+reply** mid-run, the AI assistant accepts **any OpenAI-compatible
+endpoint**, and the **password-reset / email-confirmation flow** finally
+explains itself instead of dead-ending. Also carries two database
+security fixes and a broadcast fix for audiences over 1,000 contacts.
+
+Everything the fork adds on top of upstream — WhatsApp via QR code
+(Evolution API), plain-text broadcasts, the password-recovery session
+lock, and the runtime language switcher — is unchanged and still works.
+
+> **Migration required.** Apply these in order from
+> `supabase/migrations/`:
+> `043_storage_scoped_select.sql`, `044_internal_definer_grants.sql`,
+> `045_automation_wait_for_reply.sql`, `046_ai_openai_compatible.sql`.
+>
+> **The renumbering described below was superseded by 0.10.0**, which
+> moved the fork's migrations into a reserved `900` range. If you are
+> updating past this release, follow 0.10.0's table, not this one.
+
+> **Migration renumbering (historical).** Upstream shipped its own
+> `045` and `046`, colliding with this fork's, so the fork's seven
+> Evolution migrations moved up to `047`–`053` and upstream's
+> inbound-media file to `049`. **Those filenames no longer exist**:
+> 0.10.0 moved the fork's files to the `900` range and returned
+> upstream's to `039`. The table is kept above in 0.10.0, which maps
+> the `047`–`053` names this release introduced to their final ones.
+>
+> What still applies from this release: upstream's `045` and `046`
+> must be applied by hand on an existing install, or automations will
+> park at a "wait for reply" step the database rejects and the
+> OpenAI-compatible provider will fail to save.
+>
+> CI asserts every one of these objects exists
+> (`supabase/ci/verify-schema.sql`), so a half-applied schema fails the
+> build rather than surfacing as a runtime error weeks later.
+
+### Added
+
+- **"Wait for reply" automation step.** A Send Buttons / Send List step
+  can now pause the run until the contact answers — their tap or typed
+  reply becomes `message_text` for the steps that follow, and the run
+  expires if nothing arrives inside WhatsApp's 24-hour service window.
+  While a run is waiting, that message is "consumed": keyword triggers
+  and the AI auto-reply stay quiet so the customer never gets two bots
+  answering at once. Works on **both** connection types — Meta and
+  Evolution (QR) inbound share the same pipeline here.
+- **OpenAI-compatible AI provider.** Point the assistant at any
+  OpenAI-shaped API (Ollama, vLLM, a gateway) under **Settings → AI
+  Assistant** instead of being limited to OpenAI or Anthropic. Hosts
+  outside the allow-list must be `https`, and private/link-local
+  addresses are refused unless the operator opts in explicitly with the
+  new `AI_PROVIDER_ALLOWED_PRIVATE_HOSTS` variable — so a user-supplied
+  URL cannot be aimed at your internal network.
+- **Email links that explain themselves.** `/auth/callback` now handles
+  a link Supabase already rejected (expired or used) by sending the
+  visitor to sign-in with a reason, supports reset templates built on
+  `{{ .TokenHash }}` as well as the default PKCE ones, and emits
+  relative redirects so links keep working behind a reverse proxy or
+  tunnel instead of landing on `https://0.0.0.0:3000`. `/reset-password`
+  gained a real "this link is no longer valid" screen with a button to
+  request a fresh one. See `docs/auth-emails.md`.
+- **Signed-out visitors are redirected from every dashboard route.**
+  `/flows`, `/agents` and `/notifications` previously rendered a broken
+  page instead of bouncing to sign-in. A test now reads the route folder
+  itself, so a newly added page cannot be forgotten.
+
+### Fixed
+
+- **Broadcasts to more than 1,000 contacts silently dropped
+  recipients.** Audience queries stopped at PostgREST's 1,000-row
+  response cap, so a large "all contacts" or tag audience was quietly
+  truncated. Audience resolution, recipient loading and the
+  custom-field values used for `{{1}}`-style placeholders are all paged
+  now. (Upstream #608)
+- **Stored files were readable too widely.** Storage read policies on
+  the avatars, flow-media and chat-media buckets are now scoped to the
+  owning folder and to signed-in members, instead of applying to
+  anonymous requests. (Migration `043`)
+- **Internal database functions were callable by signed-in users.**
+  `EXECUTE` on the engine's `SECURITY DEFINER` helpers (broadcast count
+  recomputation, AI reply slots, webhook failure tracking, the dedupe
+  merges) is now reserved to the service role. (Migration `044`)
+- **Page HTML could be served from a shared cache.** Responses are
+  `private, no-store`, so a CDN can't hand one visitor a page rendered
+  for another — which matters here because page content varies by the
+  language cookie.
+- **Weekday labels ignored the chosen language.** The dashboard's
+  response-time chart now formats weekdays in the active locale
+  ("Mon", "seg.", …) rather than always in English.
+- **Dependency and security updates.** Next.js 16.3.8, `supabase-js`,
+  `next-intl`, `lucide-react`, `sonner` and `tailwind-merge` bumped,
+  with minimum versions raised to clear open advisories.
+
+### Changed
+
+- **Only the active language is sent to the browser.** The client
+  bundle now carries one message catalogue instead of all of them.
+- Portuguese and Spanish translations filled in across the newly added
+  screens and validation messages; Korean kept at parity.
+
 ## [0.8.1] — 2026-07-10
 
 Fixes inbound chats fragmenting into multiple threads for the same
