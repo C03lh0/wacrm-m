@@ -134,7 +134,7 @@ BEGIN
   END IF;
 
   -- ----------------------------------------------------------------
-  -- Fork-only line, migrations 901-908.
+  -- Fork-only line, migrations 901-910.
   --
   -- These were never asserted, which is how a whole branch of the
   -- schema drifted out of production unnoticed: the numbering
@@ -201,6 +201,23 @@ BEGIN
     RAISE EXCEPTION
       'whatsapp_connections.last_inbound_at is missing — migration 907 did not apply';
   END IF;
+
+  -- 909: redeem_invitation DELETEs the caller's old account once it
+  -- believes the account is empty, and its emptiness check enumerates
+  -- account-scoped tables by name — so a table upstream does not know
+  -- about is simply absent from it. Without this line an account
+  -- holding nothing but an Evolution connection is deletable, taking
+  -- the connection with it.
+  IF pg_get_functiondef('public.redeem_invitation(text)'::regprocedure)
+     NOT LIKE '%FROM whatsapp_connections WHERE account_id = v_old_account_id%' THEN
+    RAISE EXCEPTION
+      'redeem_invitation does not guard whatsapp_connections — migration 909 did not apply (or upstream re-cut the function over it)';
+  END IF;
+
+  -- 910 needs no assertion of its own: the uuid-ossp default check
+  -- further down is exactly what it exists to satisfy on a database
+  -- created before upstream's gen_random_uuid() rewrite.
+
 
   IF EXISTS (
     SELECT 1 FROM pg_policies

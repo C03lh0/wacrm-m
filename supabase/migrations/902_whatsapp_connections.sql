@@ -27,7 +27,7 @@
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS whatsapp_connections (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   -- Audit / sender-of-record column, same role as whatsapp_config.user_id:
   -- the admin who created the connection. Used as the NOT NULL user_id FK
