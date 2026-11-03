@@ -17,7 +17,7 @@
     "linkInvalid": "이 링크로는 로그인할 수 없습니다. 이메일 인증 중이었다면 이미 인증이 완료되었을 수 있으니 아래에서 로그인하세요. 비밀번호 재설정은 새 링크를 요청한 뒤 요청한 브라우저에서 열어 주세요."
   },
   "Sidebar": {
-    "title": "WhatsApp용 CRM 템플릿",
+    "title": "Byte CRM",
     "dashboard": "대시보드",
     "inbox": "인박스",
     "notifications": "알림",
@@ -1753,9 +1753,9 @@
       "labelTooLong": "라벨은 {max}자 이하여야 합니다",
       "copied": "초대 링크가 복사되었습니다",
       "clipboardBlocked": "클립보드 접근이 차단되었습니다 — 링크를 직접 복사하세요",
-      "whatsappMessage": "이 링크(유효 기간 {expiresInDays}일)로 wacrm의 {accountName}에 참여하세요: {url}",
+      "whatsappMessage": "이 링크(유효 기간 {expiresInDays}일)로 Byte CRM의 {accountName}에 참여하세요: {url}",
       "networkError": "서버에 연결할 수 없습니다. 다시 시도할까요?",
-      "fallbackAccountName": "우리 wacrm 계정",
+      "fallbackAccountName": "우리 Byte CRM 계정",
       "createFailed": "초대를 만들지 못했습니다"
     },
     "tagsAndFields": {
@@ -1867,8 +1867,8 @@
       "saveResubmit": "저장 & 재제출",
       "submitApproval": "승인 요청",
       "deleteDialogTitle": "템플릿을 삭제하시겠습니까?",
-      "deleteMetaDesc": "\"{name}\"이(가) Meta와 wacrm에서 삭제됩니다. 이 템플릿을 사용하는 활성 브로드캐스트는 다음 전송부터 실패하기 시작합니다. 되돌릴 수 없습니다.",
-      "deleteLocalDesc": "\"{name}\"이(가) wacrm에서 삭제됩니다. Meta에 제출된 적이 없으므로 별도의 원격 정리가 필요하지 않습니다.",
+      "deleteMetaDesc": "\"{name}\"이(가) Meta와 Byte CRM에서 삭제됩니다. 이 템플릿을 사용하는 활성 브로드캐스트는 다음 전송부터 실패하기 시작합니다. 되돌릴 수 없습니다.",
+      "deleteLocalDesc": "\"{name}\"이(가) Byte CRM에서 삭제됩니다. Meta에 제출된 적이 없으므로 별도의 원격 정리가 필요하지 않습니다.",
       "deleting": "삭제 중…",
       "delete": "삭제",
       "toastLoadFailed": "템플릿을 불러오지 못했습니다",
@@ -1929,7 +1929,7 @@
       "notConnected": "연결되지 않음",
       "connectedDesc": "액세스 토큰으로 Meta 인증이 완료되었습니다. 웹훅이 실제로 연결되었는지는 아래 등록 상태를 확인하세요.",
       "notConnectedDesc": "아래에서 Meta API 자격 증명을 설정해 WhatsApp 비즈니스 계정을 연결하세요.",
-      "registered": "등록됨 — Meta가 wacrm으로 이벤트를 전달합니다",
+      "registered": "등록됨 — Meta가 Byte CRM으로 이벤트를 전달합니다",
       "notRegistered": "등록되지 않음 — Meta가 이벤트를 전달하지 않습니다",
       "verifyWithMeta": "Meta로 확인",
       "subscribedSince": "{date}부터 구독 중입니다. 이벤트가 더 이상 도착하지 않으면 Meta로 확인을 클릭하세요.",
@@ -1953,7 +1953,7 @@
       "twoStepPin": "2단계 인증 PIN",
       "optional": "(선택)",
       "pinPlaceholder": "Meta WhatsApp 관리자에서 발급받은 6자리 PIN",
-      "pinHint": "프로덕션 번호의 수신 메시지를 연결하려면 필요합니다. Meta 비즈니스 관리자 → WhatsApp 계정 → 전화번호 → 2단계 인증에서 설정한 뒤 여기에 붙여넣으면 wacrm이 해당 번호를 구독할 수 있습니다 — 그렇지 않으면 Meta는 마지막으로 이 번호를 등록한 앱으로 수신 이벤트를 보냅니다(공유 WABA 하의 두 번째 번호에서 흔히 발생하는 증상입니다). Meta 테스트 번호는 PIN이 없고 이미 등록되어 있으므로 이 필드를 비워두세요. 비워두면 기존 등록도 그대로 유지됩니다.",
+      "pinHint": "프로덕션 번호의 수신 메시지를 연결하려면 필요합니다. Meta 비즈니스 관리자 → WhatsApp 계정 → 전화번호 → 2단계 인증에서 설정한 뒤 여기에 붙여넣으면 Byte CRM이 해당 번호를 구독할 수 있습니다 — 그렇지 않으면 Meta는 마지막으로 이 번호를 등록한 앱으로 수신 이벤트를 보냅니다(공유 WABA 하의 두 번째 번호에서 흔히 발생하는 증상입니다). Meta 테스트 번호는 PIN이 없고 이미 등록되어 있으므로 이 필드를 비워두세요. 비워두면 기존 등록도 그대로 유지됩니다.",
       "webhookTitle": "웹훅 설정",
       "webhookDesc": "Meta 앱 대시보드의 웹훅 콜백으로 이 URL을 사용하세요.",
       "webhookUrl": "웹훅 콜백 URL",
@@ -2145,7 +2145,7 @@
       "themes": {
         "violet": {
           "name": "바이올렛",
-          "tagline": "기본값 — 자신감 있고 약간 발랄한 느낌."
+          "tagline": "자신감 있고 약간 발랄한 느낌."
         },
         "emerald": {
           "name": "에메랄드",
@@ -2153,7 +2153,7 @@
         },
         "cobalt": {
           "name": "코발트",
-          "tagline": "깔끔한 B2B SaaS 블루 — 차분하고 제품다운 느낌."
+          "tagline": "기본값 — 깔끔한 B2B SaaS 블루, 차분하고 제품다운 느낌."
         },
         "amber": {
           "name": "앰버",
@@ -2249,7 +2249,7 @@
     },
     "aiConfig": {
       "title": "에이전트 설정",
-      "description": "OpenAI, Anthropic 또는 OpenAI 호환 API 키를 직접 사용하세요. wacrm은 입력한 키로 제공업체를 직접 호출하므로 좌석당 AI 요금이 없으며 데이터는 그대로 유지됩니다. 받은 키는 받은편지함 AI 초안, 자동 응답 봇, Playground에 사용됩니다.",
+      "description": "OpenAI, Anthropic 또는 OpenAI 호환 API 키를 직접 사용하세요. Byte CRM은 입력한 키로 제공업체를 직접 호출하므로 좌석당 AI 요금이 없으며 데이터는 그대로 유지됩니다. 받은 키는 받은편지함 AI 초안, 자동 응답 봇, Playground에 사용됩니다.",
       "adminOnlyConfig": "관리자와 소유자만 AI 설정을 변경할 수 있습니다.",
       "loadFailed": "AI 설정을 불러오지 못했습니다",
       "providerAndKey": "공급자 & 키",
@@ -2445,7 +2445,7 @@
     "titleJoin": "계정 만들고 참여하기",
     "title": "계정 만들기",
     "descJoin": "이메일을 인증한 뒤 초대를 수락해 팀에 참여하세요.",
-    "desc": "WhatsApp용 CRM Template을 시작하세요",
+    "desc": "Byte CRM 시작하기",
     "fullNameLabel": "이름",
     "fullNamePlaceholder": "홍길동",
     "emailLabel": "이메일",
@@ -2570,7 +2570,7 @@
     }
   },
   "Metadata": {
-    "description": "직접 호스팅할 수 있는 WhatsApp용 CRM 템플릿입니다."
+    "description": "Byte CRM — WhatsApp용 CRM입니다."
   },
   "Currency": {
     "USD": "미국 달러",
@@ -3035,7 +3035,7 @@
       "wabaIdDigits": "WhatsApp Business Account ID는 숫자만 포함해야 합니다 — Meta → WhatsApp → API Setup에서 복사하세요.",
       "pinDigits": "PIN은 정확히 6자리여야 합니다.",
       "validateFailed": "설정을 검증하지 못했습니다",
-      "numberLinkedElsewhere": "이 WhatsApp 전화번호는 이미 이 인스턴스의 다른 계정에 연결되어 있습니다. 각 전화번호는 하나의 wacrm 사용자에만 연결할 수 있습니다.",
+      "numberLinkedElsewhere": "이 WhatsApp 전화번호는 이미 이 인스턴스의 다른 계정에 연결되어 있습니다. 각 전화번호는 하나의 Byte CRM 사용자에만 연결할 수 있습니다.",
       "encryptFailed": "토큰을 암호화하지 못했습니다. 환경 변수의 ENCRYPTION_KEY가 유효한 64자 16진수 문자열인지 확인하세요.",
       "updateFailed": "설정을 업데이트하지 못했습니다",
       "saveFailed": "설정을 저장하지 못했습니다",

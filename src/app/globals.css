@@ -184,7 +184,6 @@ html[data-mode='dark'] [data-slot='switch'][data-unchecked] {
 
 /* ---- ACCENT: primary color ---- */
 
-:root,
 html[data-theme='violet'] {
   --primary: oklch(0.526 0.247 293);
   --primary-foreground: oklch(0.985 0 0);
@@ -212,6 +211,7 @@ html[data-theme='emerald'] {
   --sidebar-ring: oklch(0.62 0.16 162);
 }
 
+:root,
 html[data-theme='cobalt'] {
   --primary: oklch(0.585 0.2 254);
   --primary-foreground: oklch(0.985 0 0);
