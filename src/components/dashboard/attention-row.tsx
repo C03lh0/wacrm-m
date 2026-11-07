@@ -58,19 +58,26 @@ export function AttentionRow({
   data,
   now,
   onlineCount,
+  sessionWindowApplies = true,
 }: {
   data: DashboardOverview | null
   now: number
   onlineCount: number
+  /** False for Evolution, which has no 24h reply window — the "closing" tile is hidden. */
+  sessionWindowApplies?: boolean
 }) {
   const t = useTranslations('Dashboard.overview.attention')
   const formatDuration = useFormatDuration()
   const [failedOpen, setFailedOpen] = useState(false)
+  const gridClass = cn(
+    'grid grid-cols-1 gap-3 sm:grid-cols-2',
+    sessionWindowApplies ? 'xl:grid-cols-4' : 'xl:grid-cols-3',
+  )
 
   if (!data) {
     return (
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className={gridClass}>
+        {Array.from({ length: sessionWindowApplies ? 4 : 3 }).map((_, i) => (
           <Skeleton key={i} className="h-[66px] rounded-xl" />
         ))}
       </div>
@@ -81,7 +88,7 @@ export function AttentionRow({
   const oldest = a.oldestWaitingSince ? formatDuration(minutesBetween(a.oldestWaitingSince, now)) : null
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className={gridClass}>
       <Link href="/inbox?filter=waiting" className={TILE_CLASS}>
         <TileBody
           icon={MessageSquare}
@@ -104,15 +111,17 @@ export function AttentionRow({
           meta={t('onlineNow', { count: onlineCount })}
         />
       </Link>
-      <Link href="/inbox?filter=expiring" className={TILE_CLASS}>
-        <TileBody
-          icon={Clock}
-          tone={a.windowsClosing > 0 ? 'serious' : 'calm'}
-          value={a.windowsClosing}
-          label={t('closing')}
-          meta={t('closingMeta')}
-        />
-      </Link>
+      {sessionWindowApplies && (
+        <Link href="/inbox?filter=expiring" className={TILE_CLASS}>
+          <TileBody
+            icon={Clock}
+            tone={a.windowsClosing > 0 ? 'serious' : 'calm'}
+            value={a.windowsClosing}
+            label={t('closing')}
+            meta={t('closingMeta')}
+          />
+        </Link>
+      )}
       <button type="button" className={TILE_CLASS} onClick={() => setFailedOpen(true)}>
         <TileBody
           icon={AlertTriangle}

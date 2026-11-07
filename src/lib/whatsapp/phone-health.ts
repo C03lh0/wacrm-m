@@ -9,6 +9,8 @@ export interface PhoneHealth {
   displayPhoneNumber: string | null
   quality: QualityRating
   limit: MessagingLimit | null
+  /** Set only for Evolution, which has no quality rating or messaging tier to show. */
+  provider?: 'evolution'
 }
 
 export function parseQualityRating(raw: string | null | undefined): QualityRating {

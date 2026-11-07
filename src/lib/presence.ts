@@ -28,6 +28,30 @@ export const IDLE_AFTER_MS = 5 * 60_000;
 /** What the active client reports (and what the DB stores). */
 export type StoredPresence = "online" | "away";
 
+/**
+ * Did a heartbeat fail because the request never completed, rather
+ * than because the RPC rejected it?
+ *
+ * supabase-js surfaces both as `{ error }`, but they mean opposite
+ * things. A PostgREST rejection carries a `code` and is worth shouting
+ * about — a missing function, a caller with no account. A transport
+ * failure is a bare TypeError ("Failed to fetch", "NetworkError...",
+ * Safari's "Load failed") and happens routinely: the dev server
+ * restarts under an open tab, the laptop sleeps, a blocker eats the
+ * request. Treating the second as a misconfigured RPC fills the
+ * console with red for something that fixes itself on the next beat.
+ */
+export function isTransportFailure(error: {
+  message?: string;
+  code?: string;
+} | null | undefined): boolean {
+  if (!error || error.code) return false;
+  const message = error.message ?? "";
+  return /failed to fetch|networkerror|load failed|network request failed/i.test(
+    message,
+  );
+}
+
 /** What a viewer sees — adds the derived 'offline' state. */
 export type PresenceStatus = "online" | "away" | "offline";
 

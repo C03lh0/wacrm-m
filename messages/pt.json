@@ -150,6 +150,7 @@
         "perDay": "{count}/dia",
         "unlimited": "Sem limite diário",
         "disconnected": "WhatsApp não conectado",
+        "connected": "WhatsApp conectado",
         "unavailable": "Não foi possível verificar seu número"
       },
       "attention": {
@@ -3059,6 +3060,7 @@
       "messageNotFound": "Mensagem não encontrada",
       "notSent": "Não é possível reagir a uma mensagem que não foi enviada ao WhatsApp",
       "contactNoPhone": "O contato não tem número de telefone nem ID de usuário do WhatsApp",
+      "notSupported": "Reações não são suportadas nesta conexão ({provider}).",
       "unknownMetaError": "Erro desconhecido da API da Meta",
       "metaError": "Erro da API da Meta: {message}",
       "dbDeleteFailed": "Reação enviada à Meta, mas falhou ao removê-la do banco de dados",

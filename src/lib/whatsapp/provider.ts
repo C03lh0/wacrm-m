@@ -72,6 +72,20 @@ export interface SendInteractiveListArgs {
   contextMessageId?: string
 }
 
+export interface SendReactionArgs {
+  to: string
+  /** The provider's own id of the message being reacted to. */
+  targetMessageId: string
+  /**
+   * True when the target was sent BY this account. Meta ignores it —
+   * a wamid is unambiguous on its own — but Evolution addresses the
+   * target by Baileys key, where the id is only unique per direction.
+   */
+  fromMe: boolean
+  /** Single emoji, or empty string to remove an existing reaction. */
+  emoji: string
+}
+
 /**
  * A provider client bound to one account's credentials/connection —
  * returned by `resolveProviderForAccount`, ready to call without any
@@ -86,4 +100,13 @@ export interface WhatsAppProviderClient {
   /** Omitted by providers with no native interactive messages (Evolution). */
   sendInteractiveButtons?(args: SendInteractiveButtonsArgs): Promise<ProviderSendResult>
   sendInteractiveList?(args: SendInteractiveListArgs): Promise<ProviderSendResult>
+  /**
+   * Optional like the two above, even though both current providers
+   * implement it: the route checks for presence and answers "not
+   * supported by this connection" rather than throwing, so a provider
+   * added later without reactions degrades the same way.
+   *
+   * Returns nothing — a reaction has no message of its own to track.
+   */
+  sendReaction?(args: SendReactionArgs): Promise<void>
 }

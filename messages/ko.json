@@ -150,6 +150,7 @@
         "perDay": "하루 {count}",
         "unlimited": "일일 한도 없음",
         "disconnected": "WhatsApp 연결 안 됨",
+        "connected": "WhatsApp 연결됨",
         "unavailable": "번호 상태를 확인하지 못했습니다"
       },
       "attention": {
@@ -3056,6 +3057,7 @@
       "messageNotFound": "메시지를 찾을 수 없습니다",
       "notSent": "WhatsApp으로 전송되지 않은 메시지에는 반응할 수 없습니다",
       "contactNoPhone": "연락처에 전화번호나 WhatsApp 사용자 ID가 없습니다",
+      "notSupported": "이 연결({provider})에서는 반응을 지원하지 않습니다.",
       "unknownMetaError": "알 수 없는 Meta API 오류",
       "metaError": "Meta API 오류: {message}",
       "dbDeleteFailed": "반응은 Meta로 전송되었지만 DB에서 삭제하지 못했습니다",

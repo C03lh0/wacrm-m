@@ -22,6 +22,7 @@ import {
 } from './inbound-message-pipeline'
 import { buildMediaPath } from '@/lib/storage/upload-media'
 import { isAllowedEvolutionMediaUrl } from './providers/evolution-api'
+import { jidToPhone } from './evolution-jid'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type WhatsAppConnectionRow = any
@@ -66,10 +67,6 @@ export interface EvolutionMessagePayload {
     audioMessage?: EvolutionMediaMessage
     stickerMessage?: EvolutionMediaMessage
   }
-}
-
-function jidToPhone(jid: string): string {
-  return jid.split('@')[0]?.replace(/\D/g, '') ?? jid
 }
 
 /**

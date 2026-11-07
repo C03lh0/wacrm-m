@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
-import { sendReactionMessage } from '@/lib/whatsapp/meta-api';
-import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveProviderForAccount } from '@/lib/whatsapp/provider-factory';
+import { SendMessageError } from '@/lib/whatsapp/send-message-error';
 import { resolveContactSendTarget } from '@/lib/whatsapp/wa-identity';
 import {
   checkRateLimit,
@@ -54,7 +54,9 @@ export async function POST(request: Request) {
     // Resolve target message + its conversation; verify ownership.
     const { data: targetMessage, error: msgError } = await supabase
       .from('messages')
-      .select('id, message_id, conversation_id')
+      // `sender_type` decides the reaction key's `fromMe` — see the
+      // dispatch below.
+      .select('id, message_id, conversation_id, sender_type')
       .eq('id', message_id)
       .maybeSingle();
 
@@ -98,34 +100,37 @@ export async function POST(request: Request) {
       );
     }
 
-    // WhatsApp config + access token. Account-scoped post-multi-user.
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, access_token')
-      .eq('account_id', accountId)
-      .single();
-
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: t('common.whatsappNotConfiguredDot') },
-        { status: 400 },
-      );
-    }
-
-    const accessToken = decrypt(config.access_token);
-
+    // Whichever provider this account is on. Reacting used to read
+    // whatsapp_config directly and call Meta, which meant an Evolution
+    // account — which has no config row by design — was told "WhatsApp
+    // not configured" for a connection that was working fine.
+    // provider-factory also supplies the "not connected" 409 for an
+    // Evolution instance that is not live.
     try {
-      await sendReactionMessage({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      const { client } = await resolveProviderForAccount(supabase, accountId);
+
+      if (!client.sendReaction) {
+        return NextResponse.json(
+          { error: t('react.notSupported', { provider: client.name }) },
+          { status: 400 },
+        );
+      }
+
+      await client.sendReaction({
         to: sendTarget.target,
         targetMessageId: targetMessage.message_id,
+        // An agent/bot row is a message this account sent; anything
+        // else came from the customer.
+        fromMe: targetMessage.sender_type !== 'customer',
         emoji,
       });
     } catch (err) {
+      if (err instanceof SendMessageError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
       const message =
         err instanceof Error ? err.message : t('react.unknownMetaError');
-      console.error('[whatsapp/react] Meta send failed:', message);
+      console.error('[whatsapp/react] provider send failed:', message);
       return NextResponse.json(
         { error: t('react.metaError', { message }) },
         { status: 502 },

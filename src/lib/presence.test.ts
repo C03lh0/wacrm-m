@@ -4,6 +4,7 @@ import {
   OFFLINE_AFTER_MS,
   derivePresence,
   formatLastSeen,
+  isTransportFailure,
   presenceLabel,
   summarize,
 } from "./presence";
@@ -83,5 +84,34 @@ describe("summarize", () => {
 
   it("returns zeroes for an empty roster", () => {
     expect(summarize([])).toEqual({ online: 0, away: 0, offline: 0 });
+  });
+});
+
+describe("isTransportFailure", () => {
+  // The heartbeat's own error, as supabase-js reports it when the
+  // request never left the browser.
+  it("recognises the shapes a dead fetch arrives in", () => {
+    expect(isTransportFailure({ message: "Failed to fetch" })).toBe(true);
+    expect(
+      isTransportFailure({ message: "NetworkError when attempting to fetch resource." }),
+    ).toBe(true);
+    expect(isTransportFailure({ message: "Load failed" })).toBe(true);
+  });
+
+  // A PostgREST rejection always carries a code, and means the call
+  // reached the database — that one is a real misconfiguration.
+  it("does not swallow an RPC rejection", () => {
+    expect(
+      isTransportFailure({ code: "P0001", message: "No account for caller" }),
+    ).toBe(false);
+    expect(
+      isTransportFailure({ code: "42883", message: "Failed to fetch" }),
+    ).toBe(false);
+  });
+
+  it("treats an unrecognised or empty error as a real failure", () => {
+    expect(isTransportFailure({ message: "something else" })).toBe(false);
+    expect(isTransportFailure({})).toBe(false);
+    expect(isTransportFailure(null)).toBe(false);
   });
 });

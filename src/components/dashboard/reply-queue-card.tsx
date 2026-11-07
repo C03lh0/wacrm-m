@@ -34,7 +34,16 @@ const WAIT_CLASS = {
 
 const WINDOW_WARNING_MINUTES = 120
 
-export function ReplyQueueCard({ data, now }: { data: DashboardOverview | null; now: number }) {
+export function ReplyQueueCard({
+  data,
+  now,
+  sessionWindowApplies = true,
+}: {
+  data: DashboardOverview | null
+  now: number
+  /** False for Evolution, which has no 24h reply window to warn about. */
+  sessionWindowApplies?: boolean
+}) {
   const t = useTranslations('Dashboard.overview.queue')
   const formatDuration = useFormatDuration()
   const names = new Map((data?.replies.team ?? []).map((m) => [m.userId, m.name]))
@@ -79,7 +88,7 @@ export function ReplyQueueCard({ data, now }: { data: DashboardOverview | null; 
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-foreground">{name}</p>
                       <p className="truncate text-xs text-muted-foreground">{q.preview || t('noPreview')}</p>
-                      {windowLeft > 0 && windowLeft <= WINDOW_WARNING_MINUTES ? (
+                      {sessionWindowApplies && windowLeft > 0 && windowLeft <= WINDOW_WARNING_MINUTES ? (
                         <Badge variant="outline" className="mt-1 border-status-serious/40 text-status-serious">
                           {t('windowLeft', { time: formatDuration(windowLeft) })}
                         </Badge>

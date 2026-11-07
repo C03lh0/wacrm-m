@@ -41,15 +41,26 @@ export function WhatsAppHealthChip() {
         ? t('perDay', { count: format.number(health.limit.perDay, { notation: 'compact' }) })
         : null
 
+  // Evolution has no quality rating or messaging tier — just the number.
+  const isEvolution = health.provider === 'evolution'
+
   const label =
     health.state === 'disconnected'
       ? t('disconnected')
       : health.state === 'unavailable'
         ? t('unavailable')
-        : [health.displayPhoneNumber, t(`quality.${health.quality}`), limit].filter(Boolean).join(' · ')
+        : isEvolution
+          ? (health.displayPhoneNumber ?? t('connected'))
+          : [health.displayPhoneNumber, t(`quality.${health.quality}`), limit].filter(Boolean).join(' · ')
 
   const dot =
-    health.state === 'connected' ? DOT_CLASS[health.quality] : health.state === 'disconnected' ? DOT_CLASS.RED : DOT_CLASS.UNKNOWN
+    health.state === 'connected'
+      ? isEvolution
+        ? DOT_CLASS.GREEN
+        : DOT_CLASS[health.quality]
+      : health.state === 'disconnected'
+        ? DOT_CLASS.RED
+        : DOT_CLASS.UNKNOWN
 
   return (
     <Link

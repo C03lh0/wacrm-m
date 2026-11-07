@@ -9,10 +9,12 @@
 import { SendMessageError } from '../send-message-error'
 import { EvolutionApiError } from '../evolution-errors'
 import * as evolutionApi from './evolution-api'
+import { phoneToJid } from '../evolution-jid'
 import type {
   WhatsAppProviderClient,
   SendTextArgs,
   SendMediaArgs,
+  SendReactionArgs,
   ProviderSendResult,
 } from '../provider'
 
@@ -62,6 +64,22 @@ export function createEvolutionProviderClient(
           quotedMessageId: args.contextMessageId,
         })
         return { providerMessageId: result.providerMessageId }
+      } catch (err) {
+        throw toSendMessageError(err)
+      }
+    },
+
+    async sendReaction(args: SendReactionArgs): Promise<void> {
+      try {
+        await evolutionApi.sendReaction({
+          instanceName,
+          // `to` is the contact's number everywhere in this interface;
+          // reactions are the one call that needs it as a JID.
+          remoteJid: phoneToJid(args.to),
+          messageId: args.targetMessageId,
+          fromMe: args.fromMe,
+          emoji: args.emoji,
+        })
       } catch (err) {
         throw toSendMessageError(err)
       }

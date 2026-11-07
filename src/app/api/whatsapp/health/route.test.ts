@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let storedConfig: Record<string, unknown> | null = null
+let storedConnection: Record<string, unknown> | null = null
 const getPhoneNumberHealth = vi.fn()
 
 vi.mock('@/lib/auth/account', async () => {
@@ -13,11 +14,14 @@ vi.mock('@/lib/auth/account', async () => {
       role: 'viewer',
       account: { id: 'acct-1', name: 'Acme' },
       supabase: {
-        from: () => {
+        from: (table: string) => {
           const b: Record<string, unknown> = {}
           b.select = () => b
           b.eq = () => b
-          b.maybeSingle = async () => ({ data: storedConfig, error: null })
+          b.maybeSingle = async () => ({
+            data: table === 'whatsapp_connections' ? storedConnection : storedConfig,
+            error: null,
+          })
           return b
         },
       },
@@ -34,6 +38,7 @@ import { GET } from './route'
 
 beforeEach(() => {
   storedConfig = null
+  storedConnection = null
   getPhoneNumberHealth.mockReset()
 })
 
@@ -70,5 +75,25 @@ describe('GET /api/whatsapp/health', () => {
     const res = await GET()
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ state: 'unavailable' })
+  })
+
+  it('reports an Evolution connection as connected with its number, without calling Meta', async () => {
+    storedConnection = { status: 'connected', phone_number: '+55 11 90000-0000' }
+    storedConfig = { phone_number_id: 'pn-1', access_token: 'enc', status: 'disconnected' }
+    const res = await GET()
+    expect(getPhoneNumberHealth).not.toHaveBeenCalled()
+    expect(await res.json()).toEqual({
+      state: 'connected',
+      displayPhoneNumber: '+55 11 90000-0000',
+      quality: 'UNKNOWN',
+      limit: null,
+      provider: 'evolution',
+    })
+  })
+
+  it('reports a non-connected Evolution connection as disconnected', async () => {
+    storedConnection = { status: 'disconnected', phone_number: null }
+    const res = await GET()
+    expect(await res.json()).toMatchObject({ state: 'disconnected', provider: 'evolution' })
   })
 })

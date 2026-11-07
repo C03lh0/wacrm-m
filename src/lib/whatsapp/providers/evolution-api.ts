@@ -582,6 +582,46 @@ export async function sendWhatsAppAudio(
   return { providerMessageId: extractSendResultId(await response.json()) }
 }
 
+export interface SendReactionArgs {
+  instanceName: string
+  /** The counterpart's JID, e.g. "5511999999999@s.whatsapp.net". */
+  remoteJid: string
+  /** Evolution's own id (`key.id`) of the message being reacted to. */
+  messageId: string
+  /** True when the message being reacted to was sent BY this instance. */
+  fromMe: boolean
+  /** Single emoji, or empty string to remove an existing reaction. */
+  emoji: string
+}
+
+/**
+ * Reactions address the target by its full Baileys key — `{ remoteJid,
+ * fromMe, id }` — not by id alone like `quoted` does on a send. The id
+ * is only unique within a chat and a direction, so a key missing
+ * `fromMe` can match the wrong message in a thread where both sides
+ * happen to share an id.
+ *
+ * Empty `emoji` removes the reaction, which is the same contract the
+ * Meta path uses (`sendReactionMessage`), so /api/whatsapp/react needs
+ * no provider-specific branch for removal.
+ */
+export async function sendReaction(args: SendReactionArgs): Promise<void> {
+  const { instanceName, remoteJid, messageId, fromMe, emoji } = args
+  const response = await evolutionFetch(
+    `/message/sendReaction/${encodeURIComponent(instanceName)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        key: { remoteJid, fromMe, id: messageId },
+        reaction: emoji,
+      }),
+    }
+  )
+  if (!response.ok) {
+    await throwEvolutionError(response, 'MESSAGE_SEND_FAILED')
+  }
+}
+
 export interface MarkMessageAsReadArgs {
   instanceName: string
   remoteJid: string

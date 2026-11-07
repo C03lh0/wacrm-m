@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/use-auth'
 import { useRealtime } from '@/hooks/use-realtime'
+import { useWhatsAppConnectionStatus } from '@/hooks/use-whatsapp-connection-status'
 import { Button } from '@/components/ui/button'
 import { loadActivity } from '@/lib/dashboard/queries'
 import type { ActivityItem } from '@/lib/dashboard/types'
@@ -48,6 +49,8 @@ function DashboardPageInner() {
   const searchParams = useSearchParams()
   const range = parseOverviewRange(searchParams.get('range'))
   const { defaultCurrency, profile } = useAuth()
+  const { status: whatsappStatus, loading: whatsappStatusLoading } = useWhatsAppConnectionStatus()
+  const sessionWindowApplies = whatsappStatus.enforcesSessionWindow
 
   const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [failed, setFailed] = useState(false)
@@ -120,7 +123,19 @@ function DashboardPageInner() {
     [router, searchParams],
   )
 
-  const data = overview?.days === range ? overview : null
+  const rangeData = overview?.days === range ? overview : null
+  // The overview RPC only checks whatsapp_config (Meta) for setup — an
+  // Evolution connection counts as connected too.
+  const data = useMemo(
+    () =>
+      rangeData && whatsappStatus.connected && !rangeData.setup.whatsappConnected
+        ? { ...rangeData, setup: { ...rangeData.setup, whatsappConnected: true } }
+        : rangeData,
+    [rangeData, whatsappStatus.connected],
+  )
+  // The session-window surfaces depend on the provider — keep them on
+  // their skeleton until it's known, so Evolution never flashes them.
+  const windowAwareData = whatsappStatusLoading ? null : data
 
   const onlineCount = useMemo(
     () =>
@@ -151,16 +166,21 @@ function DashboardPageInner() {
         onRangeChange={handleRangeChange}
       />
 
-      {data && needsSetup(data.setup) ? (
-        <SetupChecklist setup={data.setup} />
+      {windowAwareData && needsSetup(windowAwareData.setup) ? (
+        <SetupChecklist setup={windowAwareData.setup} />
       ) : (
         <>
-          <AttentionRow data={data} now={now} onlineCount={onlineCount} />
+          <AttentionRow
+            data={windowAwareData}
+            now={now}
+            onlineCount={onlineCount}
+            sessionWindowApplies={sessionWindowApplies}
+          />
           <KpiRow data={data} currency={defaultCurrency} />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
             <MessageVolumeCard data={data} />
-            <ReplyQueueCard data={data} now={now} />
+            <ReplyQueueCard data={windowAwareData} now={now} sessionWindowApplies={sessionWindowApplies} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">

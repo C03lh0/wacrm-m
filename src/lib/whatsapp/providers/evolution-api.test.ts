@@ -5,6 +5,7 @@ import {
   fetchInstanceInfo,
   probeInstanceLiveness,
   restartInstance,
+  sendReaction,
 } from './evolution-api'
 
 describe('findMessages', () => {
@@ -257,5 +258,102 @@ describe('restartInstance', () => {
   it('throws on a non-ok response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ message: 'nope' }), { status: 500 })))
     await expect(restartInstance({ instanceName: 'wacrm-acct-0001' })).rejects.toThrow()
+  })
+})
+
+describe('sendReaction', () => {
+  beforeEach(() => {
+    process.env.EVOLUTION_API_URL = 'https://evolution.example.com'
+    process.env.EVOLUTION_API_KEY = 'test-key'
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env.EVOLUTION_API_URL
+    delete process.env.EVOLUTION_API_KEY
+  })
+
+  function captureFetch() {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        captured.push({ url, method: init.method ?? 'GET', body: JSON.parse(String(init.body)) })
+        return new Response(JSON.stringify({ key: { id: 'reaction-1' } }), { status: 200 })
+      })
+    )
+    return captured
+  }
+
+  it('POSTs the full Baileys key to /message/sendReaction/{instance}', async () => {
+    const captured = captureFetch()
+
+    await sendReaction({
+      instanceName: 'wacrm-acct-0001',
+      remoteJid: '5511999999999@s.whatsapp.net',
+      messageId: 'ABC123',
+      fromMe: false,
+      emoji: '👍',
+    })
+
+    expect(captured).toEqual([
+      {
+        url: 'https://evolution.example.com/message/sendReaction/wacrm-acct-0001',
+        method: 'POST',
+        body: {
+          key: { remoteJid: '5511999999999@s.whatsapp.net', fromMe: false, id: 'ABC123' },
+          reaction: '👍',
+        },
+      },
+    ])
+  })
+
+  // The id alone is only unique per chat AND direction, so reacting to
+  // an agent message must not be addressed as if it were the customer's.
+  it('carries fromMe: true when reacting to a message this instance sent', async () => {
+    const captured = captureFetch()
+
+    await sendReaction({
+      instanceName: 'wacrm-acct-0001',
+      remoteJid: '5511999999999@s.whatsapp.net',
+      messageId: 'ABC123',
+      fromMe: true,
+      emoji: '🎉',
+    })
+
+    expect((captured[0].body as { key: { fromMe: boolean } }).key.fromMe).toBe(true)
+  })
+
+  it('sends an empty reaction to remove one', async () => {
+    const captured = captureFetch()
+
+    await sendReaction({
+      instanceName: 'wacrm-acct-0001',
+      remoteJid: '5511999999999@s.whatsapp.net',
+      messageId: 'ABC123',
+      fromMe: false,
+      emoji: '',
+    })
+
+    expect((captured[0].body as { reaction: string }).reaction).toBe('')
+  })
+
+  // 404 means Evolution does not know this instance — the case that
+  // surfaced as "WhatsApp not configured" before reactions went through
+  // the provider abstraction.
+  it('maps a 404 to EVOLUTION_CONNECTION_ERROR', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ message: 'instance not found' }), { status: 404 }))
+    )
+
+    await expect(
+      sendReaction({
+        instanceName: 'wacrm-acct-0001',
+        remoteJid: '5511999999999@s.whatsapp.net',
+        messageId: 'ABC123',
+        fromMe: false,
+        emoji: '👍',
+      })
+    ).rejects.toMatchObject({ code: 'EVOLUTION_CONNECTION_ERROR', status: 404 })
   })
 })

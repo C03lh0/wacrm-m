@@ -28,6 +28,21 @@ export async function GET() {
     const limit = checkRateLimit(`whatsapp-health:${userId}`, RATE_LIMITS.whatsappHealth)
     if (!limit.success) return rateLimitResponse(limit)
 
+    // Same precedence as resolveProviderForAccount (provider-factory.ts):
+    // an Evolution connection row wins over whatsapp_config. Evolution has
+    // no live quality/tier lookup, so its cached status is the answer.
+    const { data: evolution } = await supabase
+      .from('whatsapp_connections')
+      .select('status, phone_number')
+      .eq('account_id', accountId)
+      .maybeSingle()
+
+    if (evolution) {
+      return evolution.status === 'connected'
+        ? reply({ ...EMPTY, state: 'connected', displayPhoneNumber: evolution.phone_number ?? null, provider: 'evolution' })
+        : reply({ ...EMPTY, state: 'disconnected', provider: 'evolution' })
+    }
+
     const { data: config } = await supabase
       .from('whatsapp_config')
       .select('phone_number_id, access_token, status')

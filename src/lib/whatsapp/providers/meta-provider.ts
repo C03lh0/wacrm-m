@@ -12,6 +12,7 @@ import {
   sendTemplateMessage,
   sendInteractiveButtons as metaSendInteractiveButtons,
   sendInteractiveList as metaSendInteractiveList,
+  sendReactionMessage,
 } from '../meta-api'
 import type {
   WhatsAppProviderClient,
@@ -20,6 +21,7 @@ import type {
   SendTemplateArgs,
   SendInteractiveButtonsArgs,
   SendInteractiveListArgs,
+  SendReactionArgs,
   ProviderSendResult,
 } from '../provider'
 
@@ -107,6 +109,18 @@ export function createMetaProviderClient(
         contextMessageId: args.contextMessageId,
       })
       return { providerMessageId: result.messageId }
+    },
+
+    // `fromMe` is unused here: a wamid identifies the message on its
+    // own, in either direction.
+    async sendReaction(args: SendReactionArgs): Promise<void> {
+      await sendReactionMessage({
+        phoneNumberId,
+        accessToken,
+        to: args.to,
+        targetMessageId: args.targetMessageId,
+        emoji: args.emoji,
+      })
     },
   }
 }
